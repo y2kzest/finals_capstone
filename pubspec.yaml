@@ -17,8 +17,9 @@ dependencies:
   supabase_flutter: ^2.10.3
   
   # Moved here from dev_dependencies: These are required for runtime functionality (file picking, path resolution)
-  file_picker: ^6.1.1
+  file_picker: ^10.3.6
   path: ^1.8.3
+  google_fonts: ^6.1.0
 
 dev_dependencies:
   flutter_test:
@@ -30,4 +31,5 @@ flutter:
 
   assets:
     - .env
-    - assets/img/logo.png
+    - assets/img/
+    - assets/img/categories/

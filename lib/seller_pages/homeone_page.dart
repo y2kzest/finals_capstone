@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'fill_business_info.dart'; // Make sure this file exists
 import 'dashboard_screen.dart'; // 👈 Import your Shop Dashboard file
 
-class ActivateQuickcartPage extends StatelessWidget {
-  const ActivateQuickcartPage({super.key});
+class HomeOnePage  extends StatelessWidget {
+  const HomeOnePage ({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -123,14 +123,15 @@ class ActivateQuickcartPage extends StatelessWidget {
                   ),
                   elevation: 0,
                 ),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const FillBusinessInfoPage(),
-                    ),
-                  );
-                },
+onPressed: () {
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (context) => FillBusinessInfoPage(), // ❌ removed const
+    ),
+  );
+},
+
                 child: const Text(
                   "Activate",
                   style: TextStyle(
