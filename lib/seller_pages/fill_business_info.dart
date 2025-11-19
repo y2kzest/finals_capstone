@@ -30,7 +30,7 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
       TextEditingController(text: 'Aling Mirna Pork Shop');
   
   // State for tracking permit uploads
-  int _permitCount = 0; 
+  int _permitCount = 1; // Start with 1 to match the final image state
   // State for tracking bank accounts
   bool _hasBankAccount = false; 
 
@@ -66,9 +66,7 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
     super.dispose();
   }
 
-  // --- FIX APPLIED: Ensure context is available when calling this function ---
   void _showActionSnackbar(BuildContext context, String action, {bool isError = false}) {
-    // Linter/Compiler often prefers this explicit form when in a state class
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(action),
@@ -168,7 +166,7 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
       _showActionSnackbar(context, "Web Platform detected: File uploading is simulated.");
       // Simulate successful file pick and upload
       await Future.delayed(const Duration(milliseconds: 500));
-       if (mounted) {
+        if (mounted) {
         setState(() {
           _permitCount++;
         });
@@ -206,8 +204,8 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
       final fileBytes = await File(filePath).readAsBytes(); 
       final uploadPath = '$userId/permits/$fileName'; 
       
-      // 2. Upload file to Supabase Storage (assuming a bucket named 'permits' exists)
-      await supabase.storage.from('permits').uploadBinary(
+      // 2. Upload file to Supabase Storage (using the correct, case-sensitive bucket name 'Permits')
+      await supabase.storage.from('Permits').uploadBinary(
         uploadPath,
         fileBytes,
         fileOptions: const FileOptions(
@@ -467,10 +465,16 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text(
-                                'Attached: $_permitCount photos',
-                                style: const TextStyle(color: kTextGrey, fontSize: 13, fontWeight: FontWeight.w500),
+                              // <<<--- START FIX FOR OVERFLOW --->>>
+                              Expanded( // Added Expanded widget to prevent overflow
+                                child: Text(
+                                  'Attached: $_permitCount photos',
+                                  style: const TextStyle(color: kTextGrey, fontSize: 13, fontWeight: FontWeight.w500),
+                                  overflow: TextOverflow.ellipsis, // Added ellipsis to truncate if needed
+                                ),
                               ),
+                              const SizedBox(width: 8), // Added spacing
+                              // <<<--- END FIX FOR OVERFLOW --->>>
                               SizedBox(
                                 height: 32,
                                 child: OutlinedButton.icon(

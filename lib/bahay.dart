@@ -3,9 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'pages/home_page.dart';
 import 'pages/category_page.dart';
-// 👈 NEW: Import the Profile Page
+//  NEW: Import the Profile Page
 import 'profile.dart'; 
-
 
 void main() {
   runApp(const Bahay());

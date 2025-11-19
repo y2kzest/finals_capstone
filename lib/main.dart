@@ -4,30 +4,27 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'bahay.dart'; 
-import 'signup.dart'; // <<< MODIFIED: Import the functional SignupPage
+import 'signup.dart'; 
+import 'seller_pages/fill_business_info.dart'; 
 
 // --- SUPABASE KEYS FOR WEB ENVIRONMENT ---
-// These constants are used when kIsWeb is true (e.g., running in Edge, Chrome, etc.).
-// Their values match the ones in your .env file.
 const String kSupabaseUrl = 'https://mnnnmdlvjvwyxhadeinc.supabase.co';
 const String kSupabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ubm5tZGx2anZ3eXhoYWRlaW5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5NzI1NTksImV4cCI6MjA3ODU0ODU1OX0.NxQDcEBhw4XrFbjKeiYQFtN9pvEuLOAi4XiHmzxcKgw';
 
-// --- MAIN FUNCTION (FIX APPLIED) ---
+// --- MAIN FUNCTION ---
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   if (kIsWeb) {
-    // Web environment: use hardcoded constants for simplicity
+    // Web environment: use hardcoded constants
     await Supabase.initialize(
       url: kSupabaseUrl,
       anonKey: kSupabaseAnonKey,
     );
   } else {
-    // Mobile and Desktop (including Android): load .env file
+    // Mobile and Desktop: load .env file
     await dotenv.load(fileName: ".env");
     
-    // ⭐ CORRECT FIX: Use the actual environment variable NAMES (keys) 
-    // defined in your .env file: 'SUPABASE_URL' and 'SUPABASE_ANON_KEY'.
     await Supabase.initialize(
       url: dotenv.env['SUPABASE_URL']!, 
       anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
@@ -47,11 +44,9 @@ class MyApp extends StatelessWidget {
       title: 'QuickCart',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        // Use kPrimaryBlue from the State class for consistency
         primaryColor: _LoginPageState.kPrimaryBlue, 
         fontFamily: 'Inter',
       ),
-      // Start directly on the Login Page
       home: const LoginPage(), 
     );
   }
@@ -76,7 +71,7 @@ class _LoginPageState extends State<LoginPage> {
 
   // Primary design color (Standard Blue for links/focus)
   static const Color kPrimaryBlue = Color(0xFF1E88E5); 
-  // Darker Blue for the main button and branding, matching the image aesthetic
+  // Darker Blue for the main button and branding
   static const Color kButtonBlue = Color(0xFF334D8C); 
 
   // --- Modal Content Definitions ---
@@ -161,7 +156,7 @@ class _LoginPageState extends State<LoginPage> {
       if (res.session != null) {
         if (!mounted) return;
 
-        // ✅ Navigate to the correct Bahay screen on successful sign-in
+        // Navigate to the correct Bahay screen on successful sign-in
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
@@ -169,7 +164,6 @@ class _LoginPageState extends State<LoginPage> {
           ),
         );
       } else {
-        // This block usually isn't hit on an AuthException, but included for safety.
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Sign in failed. Check your credentials.")),
         );
@@ -189,15 +183,87 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  // MODIFIED: Navigates to the functional SignupPage
-  void _signUp() {
+  // 🎯 NEW: Function to navigate directly to the Seller Business Info Page
+  void _navigateToSellerSignup() {
+    print('Navigating to FillBusinessInfoPage for Seller');
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => const SignupPage(), // Use the functional component
+        builder: (context) => const FillBusinessInfoPage(), 
       ),
     );
   }
+
+  // Function to navigate to the Buyer/Standard Signup Page
+  void _navigateToBuyerSignup() {
+    print('Navigating to SignupPage as Buyer');
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const SignupPage(), 
+      ),
+    );
+  }
+
+
+  // Function to show a role selection dialog on sign up
+  void _signUp() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text(
+            "Choose Account Type",
+            style: TextStyle(fontWeight: FontWeight.bold, color: kButtonBlue),
+            textAlign: TextAlign.center,
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 🚀 UPDATED: Button to sign up as Seller
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pop(); // Close the dialog
+                  _navigateToSellerSignup(); // Navigate to seller form
+                },
+                icon: const Icon(Icons.store, color: Colors.white),
+                label: const Text("Sign up as Seller", style: TextStyle(fontSize: 16, color: Colors.white)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2A4BA0), 
+                  minimumSize: const Size(double.infinity, 50),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  elevation: 4,
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Button to sign up as Buyer
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pop(); // Close the dialog
+                  _navigateToBuyerSignup(); // Navigate to buyer/standard signup
+                },
+                icon: const Icon(Icons.shopping_cart, color: Colors.white),
+                label: const Text("Sign up as Buyer", style: TextStyle(fontSize: 16, color: Colors.white)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2A4BA0),
+                  minimumSize: const Size(double.infinity, 50),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  elevation: 4,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
 
   // Widget to build social login buttons (Moved into State for context access)
   Widget _buildSocialButton(String imageUrl, VoidCallback onTap) {
@@ -426,21 +492,21 @@ Widget build(BuildContext context) {
                   onPressed: _isLoading ? null : _signIn,
                   child: _isLoading
                       ? const SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 3,
-                              color: Colors.white,
-                            ),
-                          )
-                      : const Text(
-                            "Sign in",
-                            style: TextStyle(
-                                fontSize: 18, 
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white 
-                              ),
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 3,
+                            color: Colors.white,
                           ),
+                        )
+                      : const Text(
+                          "Sign in",
+                          style: TextStyle(
+                              fontSize: 18, 
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white 
+                            ),
+                        ),
                 ),
               ),
               
@@ -478,7 +544,7 @@ Widget build(BuildContext context) {
                 children: [
                   const Text("Don't have an account?", style: TextStyle(color: Colors.black54)),
                   TextButton(
-                    onPressed: _signUp, // Calls the updated navigation logic
+                    onPressed: _signUp, // Calls the role selection dialog
                     child: const Text("Sign Up", style: TextStyle(color: kPrimaryBlue, fontWeight: FontWeight.bold)),
                   ),
                 ],

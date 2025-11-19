@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'main.dart'; // 👈 1. IMPORT FIX: Adjust this path if 'main.dart' is in a different location (e.g., 'main.dart' if in the same folder)
+import 'main.dart'; 
+// 🔑 NEW: Import the Seller Dashboard Screen
+import 'seller_pages/dashboard_screen.dart'; 
 
 // Define a consistent color for the theme (assuming it's used elsewhere)
 const Color kDeepBlue = Color(0xFF1E3A8A);
@@ -202,7 +204,7 @@ class _ProfileState extends State<Profile> {
     return Column(
       children: [
         Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start, // Align to start for better text flow
           children: [
             Stack(
               children: [
@@ -231,33 +233,66 @@ class _ProfileState extends State<Profile> {
               ],
             ),
             const SizedBox(width: 15),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  emailDisplay,
-                  style: const TextStyle(fontSize: 14, color: Colors.grey),
-                ),
-                const SizedBox(height: 5),
-                // Edit Profile Button
-                ElevatedButton(
-                  onPressed: () {
-                    // TODO: Implement Edit Profile Navigation or full-page edit
-                    _showSnackBar("Edit Profile functionality TBD. Try tapping the rows below!");
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: kDeepBlue,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
-                    minimumSize: const Size(0, 24),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+            
+            // This Expanded widget is key to making sure the buttons have enough space
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
-                  child: const Text('Edit Profile', style: TextStyle(color: Colors.white, fontSize: 12)),
-                ),
-              ],
+                  Text(
+                    emailDisplay,
+                    style: const TextStyle(fontSize: 14, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 5),
+                  
+                  // Use Wrap to handle the two buttons flexibly
+                  Wrap(
+                    spacing: 8.0, // horizontal space between buttons
+                    runSpacing: 4.0, // vertical space between rows of buttons
+                    children: [
+                      // Existing Edit Profile Button
+                      ElevatedButton(
+                        onPressed: () {
+                          // TODO: Implement Edit Profile Navigation or full-page edit
+                          _showSnackBar("Edit Profile functionality TBD. Try tapping the rows below!");
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: kDeepBlue,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+                          minimumSize: const Size(0, 24),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                        ),
+                        child: const Text('Edit Profile', style: TextStyle(color: Colors.white, fontSize: 12)),
+                      ),
+                      
+                      // NEW 'APPLY AS SELLER' BUTTON with Navigation
+                      ElevatedButton(
+                        onPressed: () {
+                          // NAVIGATION IMPLEMENTED HERE
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              // Assuming the class in 'dashboard_screen.dart' is named SellerDashboardScreen
+                              builder: (context) => const ShopDashboardScreen(), 
+                            ),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.teal, 
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+                          minimumSize: const Size(0, 24),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                        ),
+                        child: const Text('Apply as Seller', style: TextStyle(color: Colors.white, fontSize: 12)),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ],
         ),

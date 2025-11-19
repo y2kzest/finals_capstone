@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ProductViewPage extends StatelessWidget {
-  final Map<String, String> product;
+  final Map<String, dynamic> product;
   const ProductViewPage({super.key, required this.product});
 
   @override
@@ -11,6 +12,7 @@ class ProductViewPage extends StatelessWidget {
       body: SafeArea(
         child: Column(
           children: [
+            // HEADER
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Row(
@@ -26,29 +28,10 @@ class ProductViewPage extends StatelessWidget {
                       textAlign: TextAlign.center,
                     ),
                   ),
-                  Stack(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.shopping_cart_outlined),
-                        onPressed: () {},
-                      ),
-                      Positioned(
-                        right: 6,
-                        top: 6,
-                        child: Container(
-                          padding: const EdgeInsets.all(4),
-                          decoration: const BoxDecoration(
-                            color: Colors.orange,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Text(
-                            '3',
-                            style: TextStyle(fontSize: 10, color: Colors.white),
-                          ),
-                        ),
-                      ),
-                    ],
-                  )
+                  IconButton(
+                    icon: const Icon(Icons.shopping_cart_outlined),
+                    onPressed: () {},
+                  ),
                 ],
               ),
             ),
@@ -56,10 +39,13 @@ class ProductViewPage extends StatelessWidget {
             const SizedBox(height: 10),
             const Icon(Icons.image_outlined, size: 120, color: Colors.grey),
             const SizedBox(height: 6),
+
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _indicator(true), _indicator(false), _indicator(false),
+                _indicator(true),
+                _indicator(false),
+                _indicator(false),
               ],
             ),
 
@@ -76,46 +62,37 @@ class ProductViewPage extends StatelessWidget {
                     topRight: Radius.circular(30),
                   ),
                 ),
+
                 child: SingleChildScrollView(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        product['name']!,
+                        product['name'],
                         style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                       ),
-                      const SizedBox(height: 8),
+
+                      const SizedBox(height: 10),
 
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            "${product['price']!}/KG",
-                            style: const TextStyle(fontSize: 16, color: Color(0xFF1A3C8C), fontWeight: FontWeight.bold),
+                            "₱${product['price']}/KG",
+                            style: const TextStyle(
+                                fontSize: 16,
+                                color: Color(0xFF1A3C8C),
+                                fontWeight: FontWeight.bold),
                           ),
-                          const Text(
-                            "Reg: ₱000",
-                            style: TextStyle(color: Colors.grey),
-                          ),
+                          const Text("Reg: ₱000", style: TextStyle(color: Colors.grey)),
                         ],
                       ),
-                      const SizedBox(height: 10),
 
-                      Row(
-                        children: const [
-                          Icon(Icons.star, size: 18, color: Colors.orange),
-                          Icon(Icons.star, size: 18, color: Colors.orange),
-                          Icon(Icons.star, size: 18, color: Colors.orange),
-                          Icon(Icons.star, size: 18, color: Colors.orange),
-                          Icon(Icons.star_half, size: 18, color: Colors.orange),
-                          SizedBox(width: 6),
-                          Text("110 Reviews", style: TextStyle(color: Colors.grey, fontSize: 12)),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 20),
 
                       const Text("Details", style: TextStyle(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 6),
+
                       const Text(
                         "***************************************\n***************************************\n***************************************",
                         style: TextStyle(color: Colors.grey),
@@ -123,44 +100,91 @@ class ProductViewPage extends StatelessWidget {
 
                       const SizedBox(height: 20),
 
-                      ExpansionTile(
-                        title: const Text("Nutritional facts"),
-                        children: const [
-                          Padding(
-                            padding: EdgeInsets.all(8.0),
-                            child: Text("Nutrition details go here..."),
-                          )
-                        ],
-                      ),
-                      ExpansionTile(
-                        title: const Text("Reviews"),
-                        children: const [
-                          Padding(
-                            padding: EdgeInsets.all(8.0),
-                            child: Text("Review section..."),
-                          )
-                        ],
-                      ),
-
-                      const SizedBox(height: 20),
                       Row(
                         children: [
+                          // ADD TO CART BUTTON
                           Expanded(
                             child: OutlinedButton(
-                              onPressed: () {},
+                              onPressed: () async {
+                                final supabase = Supabase.instance.client;
+                                final user = supabase.auth.currentUser;
+
+                                if (user == null) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text("Please login first.")),
+                                  );
+                                  return;
+                                }
+
+                                // Insert into Supabase cart table
+                                final response = await supabase.from('cart').insert({
+                                  'product_name': product['name'],
+                                  'price': double.tryParse(product['price'].toString()) ?? 0,
+                                  'qty': 1,
+                                });
+
+                                if (response.error == null) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                        content: Text("Added to cart successfully!")),
+                                  );
+                                } else {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                        content: Text(
+                                            "Error: ${response.error!.message}")),
+                                  );
+                                }
+                              },
                               style: OutlinedButton.styleFrom(
                                 padding: const EdgeInsets.symmetric(vertical: 14),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(30),
                                 ),
                               ),
-                              child: const Text("Add To Cart", style: TextStyle(color: Color(0xFF1A3C8C))),
+                              child: const Text(
+                                "Add To Cart",
+                                style: TextStyle(color: Color(0xFF1A3C8C)),
+                              ),
                             ),
                           ),
+
                           const SizedBox(width: 10),
+
+                          // BUY NOW BUTTON
                           Expanded(
                             child: ElevatedButton(
-                              onPressed: () {},
+                              onPressed: () async {
+                                final supabase = Supabase.instance.client;
+                                final buyerId = supabase.auth.currentUser?.id;
+
+                                if (buyerId == null) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                        content: Text("Please login first.")),
+                                  );
+                                  return;
+                                }
+
+                                final response = await supabase.from('orders').insert({
+                                  'product_name': product['name'],
+                                  'price': double.tryParse(product['price'].toString()) ?? 0,
+                                  'qty': 1,
+                                });
+
+                                if (response.error == null) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                        content: Text("Order submitted!")),
+                                  );
+                                } else {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                        content: Text(
+                                            "Error: ${response.error!.message}")),
+                                  );
+                                }
+                              },
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: const Color(0xFF1A3C8C),
                                 padding: const EdgeInsets.symmetric(vertical: 14),
@@ -173,7 +197,6 @@ class ProductViewPage extends StatelessWidget {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 10),
                     ],
                   ),
                 ),
