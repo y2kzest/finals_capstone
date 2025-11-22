@@ -142,7 +142,7 @@ class _AnalyticsReportScreenState extends State<AnalyticsReportScreen> {
                 const SizedBox(height: 10),
 
                 // --- Product Sales List ---
-                ...productSales.map((sale) => ProductSaleRow(sale: sale)).toList(),
+                ...productSales.map((sale) => ProductSaleRow(sale: sale)),
 
                 const SizedBox(height: 50),
               ],
@@ -281,7 +281,7 @@ class TimeframeMenu extends StatelessWidget {
                   ),
                 ),
               );
-            }).toList(),
+            }),
           ],
         ),
       ),

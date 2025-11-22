@@ -4,17 +4,17 @@ import 'package:flutter/foundation.dart' show kIsWeb; // Needed for platform che
 
 // --- CONDITIONAL DEPENDENCIES for File Picking ---
 // Use this pattern to prevent compilation errors on the web.
-import 'dart:io' if (dart.library.html) 'dart:io'; 
-import 'package:file_picker/file_picker.dart' if (dart.library.html) 'package:file_picker/file_picker.dart'; 
-import 'package:supabase_flutter/supabase_flutter.dart'; 
-import 'package:path/path.dart'; 
+import 'dart:io' if (dart.library.html) 'dart:io';
+import 'package:file_picker/file_picker.dart' if (dart.library.html) 'package:file_picker/file_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:path/path.dart';
 // ----------------------------------------------
-
 
 // Defined constants for consistent design
 const Color kPrimaryBlue = Color(0xFF3455EB);
 const Color kInactiveGrey = Color(0xFFE0E0E0);
 const Color kTextGrey = Color(0xFF757575);
+const int kTotalSteps = 6; // Now consistently 6
 
 class FillBusinessInfoPage extends StatefulWidget {
   const FillBusinessInfoPage({super.key});
@@ -27,35 +27,48 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
   // State variables for inputs
   String _selectedBusinessCategory = 'Retail Store';
   final TextEditingController _storeNameController =
-      TextEditingController(text: 'Aling Mirna Pork Shop');
-  
-  // State for tracking permit uploads
-  int _permitCount = 1; // Start with 1 to match the final image state
-  // State for tracking bank accounts
-  bool _hasBankAccount = false; 
+        TextEditingController(text: '');
+  int _permitCount = 0;
+  bool _hasBankAccount = false;
+  String? _logoUrl; 
 
-  // Calculates the number of completed steps out of 5 total steps
+  // 🎯 NEW: State for Steps 5 and 6 (Simulated/Placeholder)
+  bool _productsAdded = false; 
+  bool _contactInfoSet = false;
+
+  // Calculates the number of completed steps out of 6 total steps
   int get _completedSteps {
     int steps = 0;
+    
     // Step 1: Store Information (Name & Category)
     if (_storeNameController.text.isNotEmpty) {
       steps++;
     }
+    
     // Step 2: Bank Accounts
     if (_hasBankAccount) {
       steps++;
     }
 
-    // Step 3: Products/Services (Placeholder logic: assume incomplete)
-    // steps += 0;
-
-    // Step 4: Permits (Completed if at least one photo is attached)
+    // Step 3: Permits
     if (_permitCount > 0) {
       steps++;
     }
 
-    // Step 5: Store Contact (Placeholder logic: assume incomplete)
-    // steps += 0; 
+    // Step 4: Logo Upload
+    if (_logoUrl != null) {
+      steps++;
+    }
+
+    // Step 5: Products/Services (NEW TRACKING)
+    if (_productsAdded) {
+      steps++;
+    }
+
+    // Step 6: Store Contact (NEW TRACKING)
+    if (_contactInfoSet) {
+      steps++; 
+    }
     
     return steps; 
   }
@@ -76,83 +89,71 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
     );
   }
 
-  // --- Bank Account Modal ---
-  void _addBankAccount(BuildContext context) {
-    final TextEditingController accountNameController = TextEditingController();
-    final TextEditingController accountNumberController = TextEditingController();
+  // 🎯 NEW: Simulation for Products/Services Step
+  void _simulateProductsAdded(BuildContext context) async {
+    _showActionSnackbar(context, "Simulating product listing and inventory setup...");
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (mounted) {
+      setState(() {
+        _productsAdded = true;
+      });
+      _showActionSnackbar(context, "Products/Services marked as complete!", isError: false);
+    }
+  }
+
+  // 🎯 NEW: Simulation for Contact Info Step
+  void _simulateContactSet(BuildContext context) async {
+    _showActionSnackbar(context, "Simulating setting up store contact details...");
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (mounted) {
+      setState(() {
+        _contactInfoSet = true;
+      });
+      _showActionSnackbar(context, "Contact Information marked as complete!", isError: false);
+    }
+  }
+
+  // --- LOGO UPLOAD FUNCTION (SIMULATED) ---
+  Future<void> _uploadLogo(BuildContext context) async {
+    final supabase = Supabase.instance.client;
+    final userId = supabase.auth.currentUser?.id;
+
+    if (userId == null) {
+      _showActionSnackbar(context, "Error: User not logged in.", isError: true);
+      return;
+    }
+
+    if (kIsWeb) {
+      // Simulate successful file pick and upload on Web
+      _showActionSnackbar(context, "Web Platform: Logo upload simulated.");
+      await Future.delayed(const Duration(milliseconds: 500));
+        if (mounted) {
+        setState(() {
+          // Simulate a successful upload by setting a placeholder URL
+          _logoUrl = "https://placehold.co/100x100/3455EB/FFFFFF/png?text=LOGO"; 
+        });
+        _showActionSnackbar(context, "Logo simulated uploaded successfully!", isError: false);
+      }
+      return;
+    }
+
+    // --- REAL LOGIC (Mobile/Desktop) ---
+    // Note: Actual logic would involve FilePicker, upload, and getting the public URL.
+    _showActionSnackbar(context, "Mobile/Desktop: Logo upload functionality placeholder.");
     
-    showDialog(
-      context: context,
-      builder: (BuildContext dialogContext) { // Use dialogContext for the inner scope
-        return AlertDialog(
-          title: const Text('Add Bank Account', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: SingleChildScrollView(
-            child: ListBody(
-              children: <Widget>[
-                const Text('Account Name', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: accountNameController,
-                  decoration: InputDecoration(
-                    hintText: "e.g., Juan Dela Cruz",
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                    contentPadding: const EdgeInsets.all(12),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text('Account Number', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: accountNumberController,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                    hintText: "1234567890",
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                    contentPadding: const EdgeInsets.all(12),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text('Note: This is simulated for the preview.', style: TextStyle(fontSize: 12, color: kTextGrey)),
-              ],
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('Cancel', style: TextStyle(color: kTextGrey)),
-              onPressed: () {
-                Navigator.of(dialogContext).pop();
-              },
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: kPrimaryBlue,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () {
-                if (accountNameController.text.isNotEmpty && accountNumberController.text.length >= 8) {
-                  setState(() {
-                    _hasBankAccount = true; // Set state to completed
-                  });
-                  Navigator.of(dialogContext).pop();
-                  // Passing the context from the outer state's build method
-                  _showActionSnackbar(context, 'Bank Account added successfully!', isError: false); 
-                } else {
-                  _showActionSnackbar(context, 'Please enter valid account details.', isError: true);
-                }
-              },
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      },
-    );
+    // Fallback simulation for non-web environments without file access
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (mounted) {
+      setState(() {
+        _logoUrl = "https://placehold.co/100x100/3455EB/FFFFFF/png?text=LOGO"; 
+      });
+      _showActionSnackbar(context, "Logo simulated uploaded successfully!", isError: false);
+    }
   }
 
 
   // --- PERMIT ATTACHMENT FUNCTION (REAL FILE PICKER LOGIC) ---
-
   Future<void> _attachPermitPhoto(BuildContext context) async {
-    // Requires Supabase to be initialized globally in your Flutter app
     final supabase = Supabase.instance.client;
     final userId = supabase.auth.currentUser?.id;
 
@@ -162,9 +163,7 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
     }
 
     if (kIsWeb) {
-      // Fallback/Placeholder for Web, as FilePicker and dart:io behave differently/fail on web preview.
       _showActionSnackbar(context, "Web Platform detected: File uploading is simulated.");
-      // Simulate successful file pick and upload
       await Future.delayed(const Duration(milliseconds: 500));
         if (mounted) {
         setState(() {
@@ -178,7 +177,6 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
     // --- REAL LOGIC (Mobile/Desktop) ---
     FilePickerResult? result;
     try {
-      // 1. Launch File Picker to select an image
       result = await FilePicker.platform.pickFiles(
         type: FileType.image,
         allowMultiple: false,
@@ -200,11 +198,9 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
     _showActionSnackbar(context, "Uploading $fileName...");
 
     try {
-      // Use dart:io.File only when not on web
       final fileBytes = await File(filePath).readAsBytes(); 
       final uploadPath = '$userId/permits/$fileName'; 
       
-      // 2. Upload file to Supabase Storage (using the correct, case-sensitive bucket name 'Permits')
       await supabase.storage.from('Permits').uploadBinary(
         uploadPath,
         fileBytes,
@@ -225,6 +221,62 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
       _showActionSnackbar(context, "Supabase Upload Error: ${e.message}", isError: true);
     } catch (e) {
       _showActionSnackbar(context, "Upload failed: $e", isError: true);
+    }
+  }
+
+  // --- FINAL SUBMISSION LOGIC ---
+  Future<void> _submitDataToSupabase(BuildContext context) async {
+    final supabase = Supabase.instance.client;
+    final userId = supabase.auth.currentUser?.id;
+    
+    if (userId == null) {
+      _showActionSnackbar(context, "Authentication Error. Please log in again.", isError: true);
+      return;
+    }
+
+    if (_completedSteps < kTotalSteps) { // Check that ALL 6 steps are done
+        _showActionSnackbar(context, "Please complete all $kTotalSteps steps before proceeding.", isError: true);
+        return;
+    }
+
+    _showActionSnackbar(context, "Saving business data...", isError: false);
+
+    try {
+      // 🎯 Collect all business information into a map
+      final businessData = {
+        'user_id': userId, // Ensure we link it to the current user
+        'store_name': _storeNameController.text,
+        'category': _selectedBusinessCategory,
+        'has_bank_account': _hasBankAccount,
+        'permit_count': _permitCount,
+        'logo_url': _logoUrl, 
+        'products_added': _productsAdded, // NEW FIELD
+        'contact_info_set': _contactInfoSet, // NEW FIELD
+        'is_info_complete': true, // Mark this stage as complete
+        'created_at': DateTime.now().toIso8601String(),
+      };
+
+      // Upsert (Insert or Update) the seller profile data in a hypothetical 'seller_profiles' table
+      await supabase.from('seller_profiles').upsert(
+        businessData,
+        onConflict: 'user_id', // Conflict resolution based on user_id
+      );
+
+      _showActionSnackbar(context, "Business information saved successfully!", isError: false);
+
+      // Navigate to the next stage
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const BusinessProfileScreen(),
+          ),
+        );
+      }
+    } on PostgrestException catch (e) {
+      _showActionSnackbar(context, "Database Error: ${e.message}", isError: true);
+    } catch (e) {
+      _showActionSnackbar(context, "An unexpected error occurred: $e", isError: true);
     }
   }
 
@@ -276,8 +328,81 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
     );
   }
 
+  // --- Bank Account Modal (Unchanged) ---
+  void _addBankAccount(BuildContext context) {
+    final TextEditingController accountNameController = TextEditingController();
+    final TextEditingController accountNumberController = TextEditingController();
+    
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) { 
+        return AlertDialog(
+          title: const Text('Add Bank Account', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: SingleChildScrollView(
+            child: ListBody(
+              children: <Widget>[
+                const Text('Account Name', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: accountNameController,
+                  decoration: InputDecoration(
+                    hintText: "e.g., Juan Dela Cruz",
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    contentPadding: const EdgeInsets.all(12),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text('Account Number', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: accountNumberController,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    hintText: "1234567890",
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    contentPadding: const EdgeInsets.all(12),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text('Note: This is simulated for the preview.', style: TextStyle(fontSize: 12, color: kTextGrey)),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancel', style: TextStyle(color: kTextGrey)),
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+              },
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kPrimaryBlue,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () {
+                if (accountNameController.text.isNotEmpty && accountNumberController.text.length >= 8) {
+                  setState(() {
+                    _hasBankAccount = true; // Set state to completed
+                  });
+                  Navigator.of(dialogContext).pop();
+                  _showActionSnackbar(context, 'Bank Account added successfully!', isError: false); 
+                } else {
+                  _showActionSnackbar(context, 'Please enter valid account details.', isError: true);
+                }
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+
   @override
-  Widget build(BuildContext context) { // This context is safe to use below
+  Widget build(BuildContext context) { 
+    final double progress = _completedSteps / kTotalSteps;
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
@@ -292,31 +417,44 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
           style: TextStyle(color: Colors.black, fontSize: 16),
         ),
         centerTitle: false,
+        // 🎯 NEW: Add a visual progress bar beneath the AppBar
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(4.0),
+          child: LinearProgressIndicator(
+            value: progress,
+            backgroundColor: kInactiveGrey,
+            valueColor: const AlwaysStoppedAnimation<Color>(kPrimaryBlue),
+          ),
+        ),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // 1. Logo Placeholder
+            // 1. Logo Upload Area
             InkWell(
-              onTap: () => _showActionSnackbar(context, "Logo Upload functionality placeholder."),
+              onTap: () => _uploadLogo(context),
               child: Center(
                 child: Container(
                   width: 100,
                   height: 100,
                   decoration: BoxDecoration(
-                    border: Border.all(color: kInactiveGrey, width: 2),
+                    border: Border.all(color: _logoUrl != null ? kPrimaryBlue : kInactiveGrey, width: 2),
                     borderRadius: BorderRadius.circular(12),
                     color: Colors.grey.shade50,
                   ),
-                  child: const Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.add_a_photo_outlined, size: 36, color: kTextGrey),
-                      Text("Add Logo", style: TextStyle(color: kTextGrey, fontSize: 12)),
-                    ],
-                  ),
+                  child: _logoUrl != null
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.network(
+                            _logoUrl!,
+                            fit: BoxFit.cover,
+                            // Added an error builder just in case the placeholder fails to load
+                            errorBuilder: (context, error, stackTrace) => _buildDefaultLogo(),
+                          ),
+                        )
+                      : _buildDefaultLogo(),
                 ),
               ),
             ),
@@ -349,8 +487,8 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
                     if (value != null) {
                       setState(() {
                         _selectedBusinessCategory = value;
-                        _showActionSnackbar(context, "Category changed to $value functionality placeholder.");
                       });
+                      _showActionSnackbar(context, "Category changed to $value.");
                     }
                   },
                 ),
@@ -362,11 +500,11 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
             _buildInputField(
               label: "Store Name",
               controller: _storeNameController,
-              hint: "e.g., Aling Mirna Pork Shop",
+              hint: "Enter your store name",
               icon: Icons.storefront_outlined,
             ),
 
-            // 4. Progress indicator box (Using state data)
+            // 4. Progress indicator box 
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -390,12 +528,12 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       const Text(
-                        'Your Store Setup',
+                        'Your Store Setup Checklist',
                         style: TextStyle(
                             fontWeight: FontWeight.bold, fontSize: 16),
                       ),
                       Text(
-                        '$_completedSteps/5 Complete', // Uses dynamic completion
+                        '$_completedSteps/$kTotalSteps Complete', 
                         style: TextStyle(color: kPrimaryBlue, fontSize: 14, fontWeight: FontWeight.bold),
                       ),
                     ],
@@ -407,47 +545,34 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
                     _storeNameController.text.isNotEmpty ? _storeNameController.text : 'Store Name Not Set',
                     style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
                   ),
-                  
-                  // Action buttons
-                  Row(
-                    children: [
-                      GestureDetector(
-                        onTap: () => _showActionSnackbar(context, 'Setting Store Contact functionality placeholder.'),
-                        child: const Text('Set Store Contact',
-                            style: TextStyle(color: kPrimaryBlue, fontSize: 13, decoration: TextDecoration.underline)),
-                      ),
-                      const SizedBox(width: 16),
-                      GestureDetector(
-                        onTap: () => _showActionSnackbar(context, 'Editing Store Details functionality placeholder.'),
-                        child: const Text('Edit Details',
-                            style: TextStyle(color: kPrimaryBlue, fontSize: 13, decoration: TextDecoration.underline)),
-                      ),
-                    ],
-                  ),
-                  const Divider(height: 24, thickness: 1, color: kInactiveGrey),
+                  const Divider(height: 20, thickness: 1, color: kInactiveGrey),
 
-                  // List items (using generic list item for non-photo steps)
+
+                  // List items 
+                  // Step 1: Store Information
                   _ListItem(
                     title: 'Store Information (Name & Category)',
                     subtitle: 'Fill in basic store information',
-                    onTap: () => _showActionSnackbar(context, 'Store Information tapped functionality placeholder.'),
-                    isCompleted: true, 
+                    onTap: () => _showActionSnackbar(context, 'Store Information fields are above this progress box.'),
+                    isCompleted: _storeNameController.text.isNotEmpty, 
                   ),
-                  // Bank Accounts
+                  // Step 2: Logo Upload
+                  _ListItem(
+                    title: 'Business Logo',
+                    subtitle: _logoUrl != null ? 'Logo uploaded successfully.' : 'Upload your official business logo.',
+                    onTap: () => _uploadLogo(context), 
+                    isCompleted: _logoUrl != null,
+                    showRightArrow: true,
+                  ),
+                  // Step 3: Bank Accounts
                   _ListItem(
                     title: 'Bank Accounts',
                     subtitle: _hasBankAccount ? 'Account registered.' : 'Register your bank account to receive earnings',
-                    onTap: () => _addBankAccount(context), // Pass context here
+                    onTap: () => _addBankAccount(context), 
                     isCompleted: _hasBankAccount,
                   ),
-                  _ListItem(
-                    title: 'Products/Services',
-                    subtitle: 'Photos of your products you want to sell',
-                    onTap: () => _showActionSnackbar(context, 'Products/Services tapped functionality placeholder.'),
-                    isCompleted: false,
-                  ),
                   
-                  // Permits Section (New Interactive Block)
+                  // Step 4: Permits Section (Original complex layout)
                   Padding(
                     padding: const EdgeInsets.only(top: 8.0),
                     child: Column(
@@ -456,7 +581,7 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
                         _ListItem(
                           title: 'Permits',
                           subtitle: 'Photos of your business permits (required)',
-                          onTap: () => _attachPermitPhoto(context), // Pass context here
+                          onTap: () => _attachPermitPhoto(context), 
                           isCompleted: _permitCount > 0,
                           showRightArrow: false, // Hide arrow to make space for button
                         ),
@@ -465,20 +590,18 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              // <<<--- START FIX FOR OVERFLOW --->>>
-                              Expanded( // Added Expanded widget to prevent overflow
+                              Expanded( 
                                 child: Text(
                                   'Attached: $_permitCount photos',
                                   style: const TextStyle(color: kTextGrey, fontSize: 13, fontWeight: FontWeight.w500),
-                                  overflow: TextOverflow.ellipsis, // Added ellipsis to truncate if needed
+                                  overflow: TextOverflow.ellipsis, 
                                 ),
                               ),
-                              const SizedBox(width: 8), // Added spacing
-                              // <<<--- END FIX FOR OVERFLOW --->>>
+                              const SizedBox(width: 8), 
                               SizedBox(
                                 height: 32,
                                 child: OutlinedButton.icon(
-                                  onPressed: () => _attachPermitPhoto(context), // Pass context here
+                                  onPressed: () => _attachPermitPhoto(context), 
                                   icon: const Icon(Icons.upload_file, size: 18),
                                   label: const Text('Upload Permit', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                                   style: OutlinedButton.styleFrom(
@@ -494,13 +617,29 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
                       ],
                     ),
                   ),
+                  
+                  // Step 5: Products/Services (NEW)
+                  _ListItem(
+                    title: 'Products/Services Listing',
+                    subtitle: _productsAdded ? 'Product list simulated.' : 'Add your first products or services.',
+                    onTap: () => _simulateProductsAdded(context), 
+                    isCompleted: _productsAdded,
+                  ),
+                  
+                  // Step 6: Store Contact (NEW)
+                  _ListItem(
+                    title: 'Store Contact Information',
+                    subtitle: _contactInfoSet ? 'Contact details simulated.' : 'Set up your customer support contact details.',
+                    onTap: () => _simulateContactSet(context), 
+                    isCompleted: _contactInfoSet,
+                  ),
 
                 ],
               ),
             ),
             const SizedBox(height: 48),
 
-            // 5. Submit Button (Working navigation)
+            // 5. Submit Button (Enabled only when all steps are complete)
             SizedBox(
               width: double.infinity,
               height: 54, 
@@ -512,17 +651,12 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
                   ),
                   elevation: 5,
                 ),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const BusinessProfileScreen(),
-                    ),
-                  );
-                },
-                child: const Text(
-                  'Next: Complete Profile',
-                  style: TextStyle(
+                onPressed: _completedSteps == kTotalSteps 
+                  ? () => _submitDataToSupabase(context)
+                  : null, // Disable button if not all steps are complete
+                child: Text(
+                  _completedSteps == kTotalSteps ? 'Next: Complete Profile' : 'Complete All Steps ($_completedSteps/$kTotalSteps)',
+                  style: const TextStyle(
                       fontSize: 18,
                       color: Colors.white,
                       fontWeight: FontWeight.bold),
@@ -534,16 +668,26 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
       ),
     );
   }
+
+  // Helper widget for the default logo placeholder
+  Widget _buildDefaultLogo() {
+    return const Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.add_a_photo_outlined, size: 36, color: kTextGrey),
+        Text("Add Logo", style: TextStyle(color: kTextGrey, fontSize: 12)),
+      ],
+    );
+  }
 }
 
-// Refactored ListItem to be reusable
+// Refactored ListItem to be reusable (Unchanged)
 class _ListItem extends StatelessWidget {
   final String title;
   final String subtitle;
-  // VoidCallback is used here, so the calling code needs to ensure context is passed
   final VoidCallback onTap; 
   final bool isCompleted;
-  final bool showRightArrow; // New property for flexibility
+  final bool showRightArrow; 
 
   const _ListItem({
     required this.title,

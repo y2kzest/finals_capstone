@@ -3,13 +3,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'verification/otp.dart'; // Corrected import
 import 'bahay.dart'; 
 import 'signup.dart'; 
-import 'seller_pages/fill_business_info.dart'; 
+import 'seller_pages/activate.dart';
 
-// --- SUPABASE KEYS FOR WEB ENVIRONMENT ---
-const String kSupabaseUrl = 'https://mnnnmdlvjvwyxhadeinc.supabase.co';
-const String kSupabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ubm5tZGx2anZ3eXhoYWRlaW5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5NzI1NTksImV4cCI6MjA3ODU0ODU1OX0.NxQDcEBhw4XrFbjKeiYQFtN9pvEuLOAi4XiHmzxcKgw';
+// ====================================================================
+// !!! CRITICAL ACTION REQUIRED !!!
+// Replace these placeholder values with the EXACT Supabase URL and Anon Key
+// from your Supabase Dashboard -> Project Settings -> API.
+// ====================================================================
+const String kSupabaseUrl = 'https://mnnnmdlvjvwyxhadeinc.supabase.co'; // REPLACE THIS WITH YOUR REAL PROJECT URL
+const String kSupabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ubm5tZGx2anZ3eXhoYWRlaW5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5NzI1NTksImV4cCI6MjA3ODU0ODU1OX0.NxQDcEBhw4XrFbjKeiYQFtN9pvEuLOAi4XiHmzxcKgw'; // REPLACE THIS WITH YOUR REAL ANON KEY
+// ====================================================================
+
 
 // --- MAIN FUNCTION ---
 Future<void> main() async {
@@ -25,6 +32,7 @@ Future<void> main() async {
     // Mobile and Desktop: load .env file
     await dotenv.load(fileName: ".env");
     
+    // **ACTION REQUIRED:** Ensure your .env file is loaded correctly for non-web environments
     await Supabase.initialize(
       url: dotenv.env['SUPABASE_URL']!, 
       anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
@@ -47,7 +55,11 @@ class MyApp extends StatelessWidget {
         primaryColor: _LoginPageState.kPrimaryBlue, 
         fontFamily: 'Inter',
       ),
-      home: const LoginPage(), 
+      home: const LoginPage(),
+      // Define named route for '/home' used in OTP verification for navigation
+      routes: {
+        '/home': (context) => const Bahay(), 
+      },
     );
   }
 }
@@ -62,7 +74,8 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final supabase = Supabase.instance.client;
-  final TextEditingController _emailController = TextEditingController();
+  // Renamed controller to handle both email and phone input
+  final TextEditingController _emailOrPhoneController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
 
   bool _obscurePassword = true;
@@ -73,6 +86,11 @@ class _LoginPageState extends State<LoginPage> {
   static const Color kPrimaryBlue = Color(0xFF1E88E5); 
   // Darker Blue for the main button and branding
   static const Color kButtonBlue = Color(0xFF334D8C); 
+
+  // Helper to check if input is likely an email (contains '@' and '.')
+  bool _isEmail(String input) {
+    return input.contains('@') && input.contains('.');
+  }
 
   // --- Modal Content Definitions ---
   final String _userAgreementContent = """
@@ -125,36 +143,83 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  // Function to handle user sign-in using email and password
-  Future<void> _signIn() async {
+  // --- Phone Sign-In Flow (OTP) ---
+  Future<void> _signInWithPhoneOtp() async {
+    // 1. Pre-validation checks
     if (!_agree) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please agree to the terms and policies before signing in.")),
-      );
+      _showSnackBar("Please agree to the terms and policies before signing in.");
       return;
     }
 
-    final email = _emailController.text.trim();
-    final password = _passwordController.text.trim();
-
-    if (email.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Email and password are required.")),
-      );
+    final phone = _emailOrPhoneController.text.trim();
+    // Supabase requires E.164 format (e.g., +12025550123). Add validation hint.
+    if (phone.isEmpty || _isEmail(phone)) {
+      _showSnackBar("Please enter a valid phone number (e.g., +1234567890) for OTP login.");
       return;
     }
 
     setState(() => _isLoading = true);
 
     try {
+      // Step 1: Request OTP via Supabase passwordless sign-in
+      // This sends an SMS code to the provided phone number.
+      await supabase.auth.signInWithOtp(
+        phone: phone,
+      );
+
+      _showSnackBar("Verification code sent! Please verify your phone number.");
+      
+      if (mounted) {
+        // Step 2: Navigate to the OTP verification page
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            // Use the OtpVerificationPage defined in otp.dart
+            builder: (context) => OtpVerificationPage(phoneNumber: phone), // <-- CALL IS CORRECT
+          ),
+        );
+      }
+    } on AuthException catch (e) {
+      // The error message shows up here if Supabase rejects the phone number/request
+      _showSnackBar("OTP Request failed: ${e.message}");
+    } catch (e) {
+      _showSnackBar("An unexpected error occurred: $e");
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+
+  // Function to handle user sign-in using email and password
+  Future<void> _signInWithEmailPassword() async {
+    if (!_agree) {
+      _showSnackBar("Please agree to the terms and policies before signing in.");
+      return;
+    }
+
+    final input = _emailOrPhoneController.text.trim();
+    final password = _passwordController.text.trim();
+
+    if (input.isEmpty || password.isEmpty || !_isEmail(input)) {
+      _showSnackBar("Please enter a valid email address and password.");
+      return;
+    }
+    
+    setState(() => _isLoading = true);
+
+    try {
       final AuthResponse res = await supabase.auth.signInWithPassword(
-        email: email,
+        email: input,
         password: password,
       );
 
       // Check if a session was successfully created
       if (res.session != null) {
         if (!mounted) return;
+        
+        // Clear text fields on successful login
+        _emailOrPhoneController.clear();
+        _passwordController.clear();
 
         // Navigate to the correct Bahay screen on successful sign-in
         Navigator.pushReplacement(
@@ -164,32 +229,41 @@ class _LoginPageState extends State<LoginPage> {
           ),
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Sign in failed. Check your credentials.")),
-        );
+        _showSnackBar("Sign in failed. Check your credentials.");
       }
     } on AuthException catch (e) {
-      // Catches errors specific to Supabase Auth (e.g., user not found, wrong password)
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Login failed: ${e.message}")),
-      );
+      // The error message shows up here if Supabase rejects the email/password
+      _showSnackBar("Login failed: ${e.message}");
     } catch (e) {
-      // Catches general network or unexpected errors
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("An unexpected error occurred: $e")),
-      );
+      _showSnackBar("An unexpected error occurred: $e");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // 🎯 NEW: Function to navigate directly to the Seller Business Info Page
+  void _showSnackBar(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    }
+  }
+  
+  // 🎯 Clean up controllers when the widget is disposed
+  @override
+  void dispose() {
+    _emailOrPhoneController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  // Function to navigate directly to the Seller Business Info Page
   void _navigateToSellerSignup() {
     print('Navigating to FillBusinessInfoPage for Seller');
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => const FillBusinessInfoPage(), 
+        builder: (context) => const Activate(), 
       ),
     );
   }
@@ -197,6 +271,7 @@ class _LoginPageState extends State<LoginPage> {
   // Function to navigate to the Buyer/Standard Signup Page
   void _navigateToBuyerSignup() {
     print('Navigating to SignupPage as Buyer');
+    // Note: Since SignupPage is now in lib/signup_page.dart, we need to import it properly
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -220,7 +295,7 @@ class _LoginPageState extends State<LoginPage> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 🚀 UPDATED: Button to sign up as Seller
+              // Button to sign up as Seller
               ElevatedButton.icon(
                 onPressed: () {
                   Navigator.of(context).pop(); // Close the dialog
@@ -262,6 +337,12 @@ class _LoginPageState extends State<LoginPage> {
         );
       },
     );
+  }
+
+
+  // Function to show a role selection dialog on sign up
+  void _signUpPageNavigation() {
+    _navigateToBuyerSignup();
   }
 
 
@@ -329,17 +410,17 @@ Widget build(BuildContext context) {
               ),
               const SizedBox(height: 48), // Space between logo and fields
               
-              // --- Email Field ---
+              // --- Email/Phone Field ---
               const Text(
-                "Email Address",
+                "Email Address or Phone Number", // <-- UPDATED LABEL
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
               ),
               const SizedBox(height: 8),
               TextField(
-                controller: _emailController,
-                keyboardType: TextInputType.emailAddress,
+                controller: _emailOrPhoneController, // <-- UPDATED CONTROLLER
+                keyboardType: TextInputType.text, // Keep generic for both email and phone
                 decoration: InputDecoration(
-                  hintText: "Enter your email address",
+                  hintText: "Enter email (for password login) or phone number (for OTP login)", // <-- UPDATED HINT
                   contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
                   filled: true,
                   fillColor: Colors.white,
@@ -369,7 +450,7 @@ Widget build(BuildContext context) {
                 controller: _passwordController,
                 obscureText: _obscurePassword,
                 decoration: InputDecoration(
-                  hintText: "Enter your password",
+                  hintText: "Enter your password (Required for Email Login)",
                   contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
                   filled: true,
                   fillColor: Colors.white,
@@ -477,7 +558,7 @@ Widget build(BuildContext context) {
               ),
               const SizedBox(height: 32), 
 
-              // Sign in button (Darker Blue)
+              // Sign in button (Email/Password)
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
@@ -489,8 +570,11 @@ Widget build(BuildContext context) {
                     ),
                     elevation: 8,
                   ),
-                  onPressed: _isLoading ? null : _signIn,
-                  child: _isLoading
+                  // Only allow sign-in with email/password if the input looks like an email
+                  onPressed: _isLoading || !_isEmail(_emailOrPhoneController.text.trim())
+                      ? null
+                      : _signInWithEmailPassword, 
+                  child: _isLoading && _isEmail(_emailOrPhoneController.text.trim())
                       ? const SizedBox(
                           width: 24,
                           height: 24,
@@ -500,7 +584,45 @@ Widget build(BuildContext context) {
                           ),
                         )
                       : const Text(
-                          "Sign in",
+                          "Sign in (Email)",
+                          style: TextStyle(
+                              fontSize: 18, 
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white 
+                            ),
+                        ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // --- Phone Login Button (OTP) ---
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kPrimaryBlue, // Lighter blue for phone login
+                    padding: const EdgeInsets.symmetric(vertical: 18), 
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    elevation: 4,
+                  ),
+                  // Only allow phone login if the input does NOT look like an email
+                  onPressed: _isLoading || _isEmail(_emailOrPhoneController.text.trim())
+                      ? null
+                      : _signInWithPhoneOtp,
+                  child: _isLoading && !_isEmail(_emailOrPhoneController.text.trim())
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 3,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text(
+                          "Login with Phone (OTP)",
                           style: TextStyle(
                               fontSize: 18, 
                               fontWeight: FontWeight.bold,
@@ -512,43 +634,61 @@ Widget build(BuildContext context) {
               
               const SizedBox(height: 32),
 
-              // "other way to sign in" text divider
-              const Center(
-                child: Text(
-                  "or sign in with",
-                  style: TextStyle(color: Colors.grey, fontSize: 13),
-                ),
+              // --- Divider for Social Login ---
+              Row(
+                children: [
+                  const Expanded(child: Divider(color: Colors.grey)),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                    child: Text(
+                      "Or continue with",
+                      style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                    ),
+                  ),
+                  const Expanded(child: Divider(color: Colors.grey)),
+                ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 32),
 
-              // Social Login Buttons (Google, Facebook)
+              // --- Social Login Buttons ---
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   _buildSocialButton(
-                    'https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg',
-                    () { /* Google Sign-in logic */ },
+                    'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/1024px-Google_%22G%22_logo.svg.png',
+                    () {
+                      // TODO: Implement Google sign-in using Supabase
+                      _showSnackBar("Google Sign-in clicked (Not yet implemented)");
+                    },
                   ),
                   const SizedBox(width: 24),
                   _buildSocialButton(
-                    'https://upload.wikimedia.org/wikipedia/commons/b/b8/2021_Facebook_icon.svg',
-                    () { /* Facebook Sign-in logic */ },
+                    'https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/Facebook_Logo_%282019%29.png/1024px-Facebook_Logo_%282019%29.png',
+                    () {
+                      // TODO: Implement Facebook sign-in using Supabase
+                      _showSnackBar("Facebook Sign-in clicked (Not yet implemented)");
+                    },
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
+
+              const SizedBox(height: 32),
 
               // Sign Up link 
+              // ...
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const Text("Don't have an account?", style: TextStyle(color: Colors.black54)),
                   TextButton(
-                    onPressed: _signUp, // Calls the role selection dialog
+                    // ▼▼▼ THE FIXED LINE ▼▼▼
+                    onPressed: _signUp, // Now calls the dialog popup function
+                    // ▲▲▲ THE FIXED LINE ▲▲▲
                     child: const Text("Sign Up", style: TextStyle(color: kPrimaryBlue, fontWeight: FontWeight.bold)),
                   ),
                 ],
               )
+// ...
             ],
           ),
         ),

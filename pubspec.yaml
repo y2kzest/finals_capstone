@@ -11,6 +11,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  image_picker: ^1.0.7
   
   # Core App Dependencies
   flutter_dotenv: ^6.0.0

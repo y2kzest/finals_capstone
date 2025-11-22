@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'main.dart'; 
-// 🔑 NEW: Import the Seller Dashboard Screen
 import 'seller_pages/dashboard_screen.dart'; 
 
-// Define a consistent color for the theme (assuming it's used elsewhere)
 const Color kDeepBlue = Color(0xFF1E3A8A);
 
 class Profile extends StatefulWidget {
@@ -28,25 +26,36 @@ class _ProfileState extends State<Profile> {
     _fetchUserProfile();
   }
 
-  // --- Supabase Data Fetching ---
-  /// Fetches the profile data from the 'signup' table based on the logged-in user's ID.
+  // --- Supabase Data Fetching & Creation ---
   Future<void> _fetchUserProfile() async {
     final user = supabase.auth.currentUser;
+    
     if (user == null) {
-      if (mounted) Navigator.of(context).pop();
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const LoginPage()), 
+          (route) => false,
+        );
+        setState(() {
+          _isLoading = false;
+        });
+      }
       return;
     }
 
-    setState(() {
-      _userEmail = user.email ?? 'N/A';
-    });
+    final userEmail = user.email ?? 'N/A';
+    
+    if (mounted) { 
+      setState(() {
+        _userEmail = userEmail;
+      });
+    }
 
     try {
-      // Query the 'signup' table for the user's profile
       final response = await supabase
-          .from('signup') // The table name from your RLS policy
+          .from('profile') 
           .select()
-          .eq('user_id', user.id) // IMPORTANT: Assumes 'user_id' column links to auth.users.id
+          .eq('user_id', user.id)
           .limit(1)
           .single();
 
@@ -57,12 +66,44 @@ class _ProfileState extends State<Profile> {
         });
       }
     } on PostgrestException catch (e) {
-      // This usually happens if the profile record hasn't been created yet.
-      if (mounted) {
-        _showSnackBar("Profile data not found. Please complete your profile.");
-        setState(() {
-          _isLoading = false;
-        });
+      print('Profile fetch failed: ${e.message}. Attempting to create profile.');
+      
+      final defaultName = userEmail.split('@')[0];
+      
+      final newProfile = {
+        'user_id': user.id,
+        'email': userEmail, 
+        'name': defaultName, 
+      };
+
+      try {
+        await supabase
+            .from('profile') 
+            .insert(newProfile)
+            .select() 
+            .single();
+
+        if (mounted) {
+          setState(() {
+            _profileData = newProfile;
+            _isLoading = false;
+          });
+          _showSnackBar("New profile created successfully!");
+        }
+      } on PostgrestException catch (e) {
+        if (mounted) {
+          String message = "Error creating profile: ${e.message}";
+          
+          if (e.message.contains('violates row-level security policy')) {
+            print('⚠️ REMINDER: Check INSERT RLS policy on the profile table in Supabase!');
+            message = "Profile creation failed due to security policy. (Check Supabase RLS)";
+          }
+          
+          _showSnackBar(message);
+          setState(() {
+            _isLoading = false;
+          });
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -75,17 +116,16 @@ class _ProfileState extends State<Profile> {
   }
 
   // --- Supabase Data Update Function ---
-  /// Updates a single field in the 'signup' table and refreshes the UI.
-  Future<void> _updateProfileField(String key, String newValue) async {
+  Future<void> _updateProfileField(String key, dynamic newValue) async {
     final userId = supabase.auth.currentUser?.id;
     if (userId == null) {
       _showSnackBar("Authentication error. Please log in again.");
       return;
     }
     
-    // Do nothing if the new value is the same or empty (unless key is 'bio' and it's being set)
-    if (newValue == (_profileData?[key] ?? '') && newValue.isNotEmpty) {
-      _showSnackBar("${key} is already set to '$newValue'.");
+    final currentValue = _profileData?[key];
+    if (newValue.toString() == (currentValue?.toString() ?? '') && newValue.toString().isNotEmpty) {
+      _showSnackBar("$key is already set.");
       return;
     }
 
@@ -94,21 +134,26 @@ class _ProfileState extends State<Profile> {
     });
 
     try {
-      // Update the record where user_id matches
-      await supabase.from('signup').update({key: newValue}).eq('user_id', userId);
+      await supabase.from('profile').update({key: newValue}).eq('user_id', userId);
       
-      // Update local state without re-fetching everything
       if (mounted) {
         setState(() {
-          _profileData?[key] = newValue; // Update the local map
+          _profileData = _profileData ?? {}; 
+          
+          if (newValue is DateTime) {
+            _profileData?[key] = newValue.toIso8601String().split('T')[0]; 
+          } else {
+            _profileData?[key] = newValue; 
+          }
+          
           _isLoading = false;
         });
-        _showSnackBar("${key} updated successfully!");
+        _showSnackBar("$key updated successfully!");
       }
 
     } on PostgrestException catch (e) {
       if (mounted) {
-        _showSnackBar("Error updating ${key}: ${e.message}");
+        _showSnackBar("Error updating $key: ${e.message}");
         setState(() {
           _isLoading = false;
         });
@@ -127,7 +172,6 @@ class _ProfileState extends State<Profile> {
   void _showEditDialog(String label, String key, String? currentValue) {
     final controller = TextEditingController(text: currentValue);
     
-    // Prevent editing the email as it's typically managed by Supabase Auth
     if (key == 'email') {
       _showSnackBar('Email cannot be changed from the profile screen.');
       return;
@@ -140,6 +184,7 @@ class _ProfileState extends State<Profile> {
           title: Text('Edit $label'),
           content: TextField(
             controller: controller,
+            maxLines: key == 'bio' ? 3 : 1, 
             decoration: InputDecoration(
               labelText: label,
               border: const OutlineInputBorder(),
@@ -156,7 +201,6 @@ class _ProfileState extends State<Profile> {
               child: Text('Save', style: TextStyle(color: kDeepBlue)),
               onPressed: () {
                 Navigator.of(context).pop();
-                // Call the update function
                 _updateProfileField(key, controller.text.trim());
               },
             ),
@@ -166,18 +210,53 @@ class _ProfileState extends State<Profile> {
     );
   }
 
-  // --- Supabase Logout Function (The FIX) ---
+  // --- Dialog for Editing Date (Birthday) ---
+  void _showDateEditDialog(String label, String key, String? currentValue) async {
+    
+    DateTime initialDate = DateTime.now().subtract(const Duration(days: 365 * 20));
+    try {
+      if (currentValue != null && currentValue.isNotEmpty) {
+        initialDate = DateTime.parse(currentValue);
+      }
+    } catch (e) {
+      // If parsing fails, use the default
+    }
+
+    final DateTime? pickedDate = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: DateTime(1900),
+      lastDate: DateTime.now(),
+      helpText: 'Select your $label',
+      builder: (context, child) {
+        return Theme(
+          data: ThemeData.light().copyWith(
+            colorScheme: ColorScheme.light(
+              primary: kDeepBlue, 
+              onPrimary: Colors.white, 
+              onSurface: Colors.black, 
+            ), dialogTheme: DialogThemeData(backgroundColor: Colors.white),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (pickedDate != null) {
+      _updateProfileField(key, pickedDate);
+    }
+  }
+
+  // --- Supabase Logout Function ---
   Future<void> _signOut() async {
     try {
       await supabase.auth.signOut();
       if (mounted) {
-        // 2. NAVIGATION FIX: Use pushAndRemoveUntil with MaterialPageRoute 
-        // to go back to the explicit LoginPage defined in your main.dart.
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
-            builder: (context) => const LoginPage(), // Use the imported LoginPage
+            builder: (context) => const LoginPage(), 
           ),
-          (route) => false, // Clears the entire navigation stack
+          (route) => false, 
         );
       }
     } catch (e) {
@@ -186,7 +265,6 @@ class _ProfileState extends State<Profile> {
   }
 
   void _showSnackBar(String message) {
-    // Only show snackbar if context is still valid
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message)),
@@ -197,18 +275,17 @@ class _ProfileState extends State<Profile> {
   // --- UI Builder Methods ---
 
   Widget _buildProfileHeader() {
-    // Get profile data safely, providing default placeholders
-    final String name = _profileData?['name'] ?? 'Guest User';
-    final String emailDisplay = _profileData?['email'] ?? _userEmail; // Use auth email if signup table doesn't have it
+    final String defaultName = _userEmail.split('@')[0];
+    final String name = _profileData?['name'] ?? defaultName;
+    final String emailDisplay = _userEmail;
 
     return Column(
       children: [
         Row(
-          crossAxisAlignment: CrossAxisAlignment.start, // Align to start for better text flow
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Stack(
               children: [
-                // Profile Picture Placeholder
                 const CircleAvatar(
                   radius: 40,
                   backgroundColor: Colors.grey,
@@ -218,7 +295,7 @@ class _ProfileState extends State<Profile> {
                   bottom: 0,
                   right: 0,
                   child: GestureDetector(
-                    onTap: () => _showSnackBar("Change profile picture TBD."), // Add action here
+                    onTap: () => _showSnackBar("Change profile picture TBD."),
                     child: Container(
                       padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
@@ -234,8 +311,8 @@ class _ProfileState extends State<Profile> {
             ),
             const SizedBox(width: 15),
             
-            // This Expanded widget is key to making sure the buttons have enough space
-            Expanded(
+            // 🛠️ The Expanded widget here correctly constrains the Column width.
+            Expanded( 
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -249,15 +326,13 @@ class _ProfileState extends State<Profile> {
                   ),
                   const SizedBox(height: 5),
                   
-                  // Use Wrap to handle the two buttons flexibly
+                  // Wrap is fine here as its children are not Expanded/Flexible
                   Wrap(
-                    spacing: 8.0, // horizontal space between buttons
-                    runSpacing: 4.0, // vertical space between rows of buttons
+                    spacing: 8.0,
+                    runSpacing: 4.0,
                     children: [
-                      // Existing Edit Profile Button
                       ElevatedButton(
                         onPressed: () {
-                          // TODO: Implement Edit Profile Navigation or full-page edit
                           _showSnackBar("Edit Profile functionality TBD. Try tapping the rows below!");
                         },
                         style: ElevatedButton.styleFrom(
@@ -269,26 +344,7 @@ class _ProfileState extends State<Profile> {
                         child: const Text('Edit Profile', style: TextStyle(color: Colors.white, fontSize: 12)),
                       ),
                       
-                      // NEW 'APPLY AS SELLER' BUTTON with Navigation
-                      ElevatedButton(
-                        onPressed: () {
-                          // NAVIGATION IMPLEMENTED HERE
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              // Assuming the class in 'dashboard_screen.dart' is named SellerDashboardScreen
-                              builder: (context) => const ShopDashboardScreen(), 
-                            ),
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.teal, 
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
-                          minimumSize: const Size(0, 24),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                        ),
-                        child: const Text('Apply as Seller', style: TextStyle(color: Colors.white, fontSize: 12)),
-                      ),
+                     
                     ],
                   ),
                 ],
@@ -302,50 +358,81 @@ class _ProfileState extends State<Profile> {
   }
 
   Widget _buildProfileRow(String label, String key, String? value, {bool isEditable = false, Function()? onTap}) {
-    // Determine the value to display, using 'Set Now' for empty Bio
     String displayValue = value ?? 'N/A';
+    
+    // Check if the value is a date string and format it for display (optional)
+    if (key == 'birthday' && value != null && value.isNotEmpty) {
+      try {
+        final date = DateTime.parse(value);
+        // Format as YYYY-MM-DD
+        displayValue = '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+      } catch (_) {
+        displayValue = value; // Use original if parsing fails
+      }
+    }
+
     if (key == 'bio' && (value == null || value.isEmpty)) {
       displayValue = 'Set Now';
-      isEditable = true; // Force 'Set Now' to be editable
+      isEditable = true; 
     }
     
-    // Disable editing for Email which is displayed from auth
     if (key == 'email') {
       isEditable = false;
+      displayValue = _userEmail;
+    }
+
+    // Determine the action when the row is tapped
+    Function()? rowOnTap;
+    if (key == 'birthday') {
+      rowOnTap = () => _showDateEditDialog(label, key, value);
+    } else if (isEditable || key == 'bio') {
+      rowOnTap = () => _showEditDialog(label, key, value);
+    } else {
+      rowOnTap = onTap;
     }
 
     return Column(
       children: [
-        // The onTap function for the GestureDetector determines the action
         GestureDetector(
-          onTap: isEditable || key == 'bio' ? () => _showEditDialog(label, key, value) : onTap,
+          onTap: rowOnTap, 
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 8.0),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(label, style: const TextStyle(fontSize: 16, color: Colors.black)),
-                Row(
-                  children: [
-                    Text(
-                      displayValue,
-                      style: TextStyle(
-                        fontSize: 16, 
-                        fontWeight: FontWeight.w500,
-                        // Highlight 'Set Now' in a different color
-                        color: displayValue == 'Set Now' ? kDeepBlue : Colors.black,
+                
+                // 🛠️ FIX APPLIED HERE: Outer Flexible constrains the inner Row.
+                Flexible( 
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      // Inner Flexible allows the Text to wrap/truncate within the allocated space
+                      Flexible( 
+                        child: Text(
+                          displayValue,
+                          textAlign: TextAlign.end,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 16, 
+                            fontWeight: FontWeight.w500,
+                            color: displayValue == 'Set Now' ? kDeepBlue : Colors.black,
+                          ),
+                        ),
                       ),
-                    ),
-                    // Show arrow if it's editable or the Bio/Gender row
-                    if (isEditable || key == 'bio') 
-                      const Icon(Icons.keyboard_arrow_right, color: Colors.grey, size: 20),
-                  ],
+                      if (rowOnTap != null) 
+                        const Padding(
+                          padding: EdgeInsets.only(left: 8.0),
+                          child: Icon(Icons.keyboard_arrow_right, color: Colors.grey, size: 20),
+                        ),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
         ),
-        if (key != 'email') const Divider(height: 0), // Add divider between rows
+        if (key != 'email') const Divider(height: 0),
       ],
     );
   }
@@ -358,7 +445,6 @@ class _ProfileState extends State<Profile> {
       );
     }
 
-    // Default values if data is not present (or loading failed to find a record)
     final profile = _profileData;
 
     return Scaffold(
@@ -389,23 +475,11 @@ class _ProfileState extends State<Profile> {
               // Profile Details Rows
               const SizedBox(height: 10),
 
-              // Tappable fields (assuming keys match Supabase 'signup' table columns)
               _buildProfileRow('Name', 'name', profile?['name'], isEditable: true),
-
-              _buildProfileRow(
-                'Bio',
-                'bio',
-                profile?['bio'],
-                // isEditable is forced true inside _buildProfileRow for 'Set Now'
-              ),
-
-              // Note: Gender and Birthday might require specialized pickers in a real app,
-              // but we use the general text dialog here for demonstration.
+              _buildProfileRow('Bio', 'bio', profile?['bio']),
               _buildProfileRow('Gender', 'gender', profile?['gender'], isEditable: true),
-              _buildProfileRow('Birthday', 'birthday', profile?['birthday'], isEditable: true),
+              _buildProfileRow('Birthday', 'birthday', profile?['birthday'], isEditable: true), 
               _buildProfileRow('Phone', 'phone', profile?['phone'], isEditable: true),
-
-              // Email is not editable in this widget, as it comes from Supabase Auth
               _buildProfileRow('Email', 'email', _userEmail),
 
               const SizedBox(height: 50),
@@ -413,7 +487,7 @@ class _ProfileState extends State<Profile> {
               // Log Out Button
               Center(
                 child: ElevatedButton(
-                  onPressed: _signOut, // Calls your existing Supabase sign-out function
+                  onPressed: _signOut, 
                   style: ElevatedButton.styleFrom(
                     backgroundColor: kDeepBlue,
                     padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 12),

@@ -103,11 +103,7 @@ class _CategoryPageState extends State<CategoryPage> {
                   imagePath: "assets/img/categories/services.jpg",
                   onTap: () => setState(() => selectedCategory = "Services"),
                 ),
-                CategoryCard(
-                  title: "Snacks",
-                  imagePath: "assets/img/categories/snacks.png",
-                  onTap: () => setState(() => selectedCategory = "Snacks"),
-                ),
+                
               ],
             ),
           ],
