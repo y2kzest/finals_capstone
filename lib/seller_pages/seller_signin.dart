@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart'; // 1. Import Supabase
-import 'fill_business_info.dart'; 
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'fill_business_info.dart'; // Assuming this page exists for navigation
 
 class SellerSignInPage extends StatefulWidget {
   const SellerSignInPage({super.key});
@@ -11,6 +11,7 @@ class SellerSignInPage extends StatefulWidget {
 
 class _SellerSignInPageState extends State<SellerSignInPage> {
   // 2. Create the Supabase Client instance
+  // NOTE: Ensure Supabase.initialize has been called in your main.dart
   final supabase = Supabase.instance.client;
 
   // 3. Create Controllers to capture user input
@@ -23,7 +24,7 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
   bool _agreedToTerms = false;
   bool _isLoading = false; // To show a loading spinner
 
-  // 4. The Function to Register the Seller
+  // 4. The Function to Register the Seller - WITH ADDED DEBUG LOGGING
   Future<void> _signUpSeller() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
@@ -31,15 +32,15 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
 
     // Basic Validation
     if (email.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please fill in all fields")));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please fill in all fields")));
       return;
     }
     if (password != confirmPassword) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Passwords do not match")));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Passwords do not match")));
       return;
     }
     if (!_agreedToTerms) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("You must agree to the terms")));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("You must agree to the terms")));
       return;
     }
 
@@ -47,27 +48,73 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
 
     try {
       // --- SUPABASE SIGN UP ---
-      // This creates the user. The SQL Trigger automatically sets status to 'pending'
       final AuthResponse res = await supabase.auth.signUp(
         email: email,
         password: password,
       );
 
-      if (res.user != null) {
-        if (mounted) {
-          // Success! Navigate to the next step
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const FillBusinessInfoPage(),
-            ),
-          );
-        }
+      // --- NEW LOGIC FOR HANDLING SUCCESSFUL SIGNUP ---
+      if (res.session != null && res.user != null) {
+          // Case 1: Sign up successful AND user is immediately logged in (Email confirmation OFF)
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text("Sign up successful!"),
+                  backgroundColor: Color(0xFF25509E),
+                )
+            );
+            // Navigate to the next step
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const FillBusinessInfoPage(),
+              ),
+            );
+          }
+      } else if (res.user != null && res.session == null) {
+          // Case 2: Sign up successful, but email confirmation is REQUIRED (Session is null)
+          if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Success! Please check your email for a confirmation link to activate your account and log in."),
+                    backgroundColor: Colors.orange,
+                  )
+              );
+          }
+          // The user is not logged in, so we stay on the sign-up page or navigate to a login page.
+          // Since they are not authenticated, they cannot proceed to FillBusinessInfoPage.
+          
+      } else {
+        // Fallback for unexpected successful response without user or session
+         if (mounted) {
+             ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Sign up succeeded, but status is unclear. Check your email or try logging in."),
+                    backgroundColor: Colors.orange,
+                  )
+              );
+          }
       }
+      
     } on AuthException catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      // This catches specific Supabase Auth errors (e.g., duplicate user, weak password)
+      print("SUPABASE AUTH ERROR: ${e.statusCode} | ${e.message}"); 
+      if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text("Error: ${e.message}"),
+              backgroundColor: Colors.red.shade700,
+          ));
+      }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("An unexpected error occurred")));
+      // This catches unexpected errors (e.g., network issues, initialization problems)
+      print("UNEXPECTED ERROR DURING SIGNUP: $e"); 
+      if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              // Using the message you reported
+              content: Text("Sign up failed. Please try again."), 
+              backgroundColor: Colors.red,
+          ));
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -257,6 +304,7 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
+                    // Note: These buttons are only for display and do not have sign-in logic implemented here
                     _buildSocialButton(
                       imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/5/53/Google_%22G%22_Logo.svg/512px-Google_%22G%22_Logo.svg.png",
                       fallbackIcon: Icons.g_mobiledata,
@@ -306,6 +354,7 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
     );
   }
 
+  // Helper Widgets (Unchanged)
   Widget _buildLabel(String text) {
     return Text(
       text,
@@ -317,17 +366,16 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
     );
   }
 
-  // UPDATED: Added controller parameter
   Widget _buildTextField({
     required String hint,
-    required TextEditingController controller, // Added this
+    required TextEditingController controller,
     bool isPassword = false,
     bool obscureText = false,
     TextInputType? inputType,
     VoidCallback? onVisibilityToggle,
   }) {
     return TextField(
-      controller: controller, // Connect it here
+      controller: controller,
       obscureText: obscureText,
       keyboardType: inputType,
       style: const TextStyle(fontSize: 15),
