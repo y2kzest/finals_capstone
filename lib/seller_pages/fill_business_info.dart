@@ -93,24 +93,22 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
   void _simulateProductsAdded(BuildContext context) async {
     _showActionSnackbar(context, "Simulating product listing and inventory setup...");
     await Future.delayed(const Duration(milliseconds: 500));
-    if (mounted) {
-      setState(() {
-        _productsAdded = true;
-      });
-      _showActionSnackbar(context, "Products/Services marked as complete!", isError: false);
-    }
+    if (!context.mounted) return;
+    setState(() {
+      _productsAdded = true;
+    });
+    _showActionSnackbar(context, "Products/Services marked as complete!", isError: false);
   }
 
   // 🎯 NEW: Simulation for Contact Info Step
   void _simulateContactSet(BuildContext context) async {
     _showActionSnackbar(context, "Simulating setting up store contact details...");
     await Future.delayed(const Duration(milliseconds: 500));
-    if (mounted) {
-      setState(() {
-        _contactInfoSet = true;
-      });
-      _showActionSnackbar(context, "Contact Information marked as complete!", isError: false);
-    }
+    if (!context.mounted) return;
+    setState(() {
+      _contactInfoSet = true;
+    });
+    _showActionSnackbar(context, "Contact Information marked as complete!", isError: false);
   }
 
   // --- LOGO UPLOAD FUNCTION (SIMULATED) ---
@@ -127,13 +125,12 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
       // Simulate successful file pick and upload on Web
       _showActionSnackbar(context, "Web Platform: Logo upload simulated.");
       await Future.delayed(const Duration(milliseconds: 500));
-        if (mounted) {
-        setState(() {
-          // Simulate a successful upload by setting a placeholder URL
-          _logoUrl = "https://placehold.co/100x100/3455EB/FFFFFF/png?text=LOGO"; 
-        });
-        _showActionSnackbar(context, "Logo simulated uploaded successfully!", isError: false);
-      }
+      if (!context.mounted) return;
+      setState(() {
+        // Simulate a successful upload by setting a placeholder URL
+        _logoUrl = "https://placehold.co/100x100/3455EB/FFFFFF/png?text=LOGO"; 
+      });
+      _showActionSnackbar(context, "Logo simulated uploaded successfully!", isError: false);
       return;
     }
 
@@ -143,12 +140,11 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
     
     // Fallback simulation for non-web environments without file access
     await Future.delayed(const Duration(milliseconds: 500));
-    if (mounted) {
-      setState(() {
-        _logoUrl = "https://placehold.co/100x100/3455EB/FFFFFF/png?text=LOGO"; 
-      });
-      _showActionSnackbar(context, "Logo simulated uploaded successfully!", isError: false);
-    }
+    if (!context.mounted) return;
+    setState(() {
+      _logoUrl = "https://placehold.co/100x100/3455EB/FFFFFF/png?text=LOGO"; 
+    });
+    _showActionSnackbar(context, "Logo simulated uploaded successfully!", isError: false);
   }
 
 
@@ -165,12 +161,11 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
     if (kIsWeb) {
       _showActionSnackbar(context, "Web Platform detected: File uploading is simulated.");
       await Future.delayed(const Duration(milliseconds: 500));
-        if (mounted) {
-        setState(() {
-          _permitCount++;
-        });
-        _showActionSnackbar(context, "Permit photo simulated uploaded successfully! Count: $_permitCount", isError: false);
-      }
+      if (!context.mounted) return;
+      setState(() {
+        _permitCount++;
+      });
+      _showActionSnackbar(context, "Permit photo simulated uploaded successfully! Count: $_permitCount", isError: false);
       return;
     }
     
@@ -182,9 +177,12 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
         allowMultiple: false,
       );
     } catch (e) {
+      if (!context.mounted) return;
       _showActionSnackbar(context, "File Picker Error. Check platform configurations.", isError: true);
       return;
     }
+
+    if (!context.mounted) return;
 
     if (result == null || result.files.single.path == null) {
       _showActionSnackbar(context, "No file selected.");
@@ -199,6 +197,7 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
 
     try {
       final fileBytes = await File(filePath).readAsBytes(); 
+      if (!context.mounted) return;
       final uploadPath = '$userId/permits/$fileName'; 
       
       await supabase.storage.from('Permits').uploadBinary(
@@ -210,16 +209,17 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
         ),
       );
 
-      if (mounted) {
-        setState(() {
-          _permitCount++;
-        });
-        _showActionSnackbar(context, "Permit photo uploaded successfully! Count: $_permitCount", isError: false);
-      }
+      if (!context.mounted) return;
+      setState(() {
+        _permitCount++;
+      });
+      _showActionSnackbar(context, "Permit photo uploaded successfully! Count: $_permitCount", isError: false);
 
     } on StorageException catch (e) {
+      if (!context.mounted) return;
       _showActionSnackbar(context, "Supabase Upload Error: ${e.message}", isError: true);
     } catch (e) {
+      if (!context.mounted) return;
       _showActionSnackbar(context, "Upload failed: $e", isError: true);
     }
   }
@@ -262,20 +262,21 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
         onConflict: 'user_id', // Conflict resolution based on user_id
       );
 
+      if (!context.mounted) return;
       _showActionSnackbar(context, "Business information saved successfully!", isError: false);
 
       // Navigate to the next stage
-      if (mounted) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const BusinessProfileScreen(),
-          ),
-        );
-      }
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => const BusinessProfileScreen(),
+        ),
+      );
     } on PostgrestException catch (e) {
+      if (!context.mounted) return;
       _showActionSnackbar(context, "Database Error: ${e.message}", isError: true);
     } catch (e) {
+      if (!context.mounted) return;
       _showActionSnackbar(context, "An unexpected error occurred: $e", isError: true);
     }
   }
@@ -513,7 +514,7 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
                 border: Border.all(color: Colors.grey.shade300),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.grey.withOpacity(0.1),
+                    color: Colors.grey.withValues(alpha: 0.1),
                     spreadRadius: 1,
                     blurRadius: 5,
                     offset: const Offset(0, 3), 

@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'fill_business_info.dart'; // Assuming this page exists for navigation
@@ -23,6 +26,24 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
   bool _obscureConfirmPassword = true;
   bool _agreedToTerms = false;
   bool _isLoading = false; // To show a loading spinner
+  bool _isOAuthLoading = false;
+  bool _navigatedAfterAuth = false;
+  late final StreamSubscription<AuthState> _authSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _authSub = supabase.auth.onAuthStateChange.listen((data) {
+      if (data.event == AuthChangeEvent.signedIn && !_navigatedAfterAuth) {
+        _navigatedAfterAuth = true;
+        if (!mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const FillBusinessInfoPage()),
+        );
+      }
+    });
+  }
 
   // 4. The Function to Register the Seller - WITH ADDED DEBUG LOGGING
   Future<void> _signUpSeller() async {
@@ -63,6 +84,7 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
                   backgroundColor: Color(0xFF25509E),
                 )
             );
+            _navigatedAfterAuth = true;
             // Navigate to the next step
             Navigator.push(
               context,
@@ -98,7 +120,7 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
       
     } on AuthException catch (e) {
       // This catches specific Supabase Auth errors (e.g., duplicate user, weak password)
-      print("SUPABASE AUTH ERROR: ${e.statusCode} | ${e.message}"); 
+      debugPrint("SUPABASE AUTH ERROR: ${e.statusCode} | ${e.message}"); 
       if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
               content: Text("Error: ${e.message}"),
@@ -107,7 +129,7 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
       }
     } catch (e) {
       // This catches unexpected errors (e.g., network issues, initialization problems)
-      print("UNEXPECTED ERROR DURING SIGNUP: $e"); 
+      debugPrint("UNEXPECTED ERROR DURING SIGNUP: $e"); 
       if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
               // Using the message you reported
@@ -120,11 +142,54 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
     }
   }
 
+  Future<void> _signInWithGoogle() async {
+    if (!_agreedToTerms) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("You must agree to the terms")));
+      }
+      return;
+    }
+
+    setState(() => _isOAuthLoading = true);
+
+    final redirectUrl = kIsWeb
+        ? '${Uri.base.origin}/#/auth-callback'
+        : 'io.supabase.flutter://login-callback';
+
+    try {
+      await supabase.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: redirectUrl,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Complete Google sign-in in the browser; you'll return automatically.")),
+        );
+      }
+    } on AuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Google sign-in failed: ${e.message}")),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Unexpected error: $e")),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isOAuthLoading = false);
+    }
+  }
+
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _authSub.cancel();
     super.dispose();
   }
 
@@ -304,16 +369,22 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Note: These buttons are only for display and do not have sign-in logic implemented here
                     _buildSocialButton(
                       imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/5/53/Google_%22G%22_Logo.svg/512px-Google_%22G%22_Logo.svg.png",
                       fallbackIcon: Icons.g_mobiledata,
+                      onTap: _isOAuthLoading ? null : _signInWithGoogle,
+                      showSpinner: _isOAuthLoading,
                     ),
                     const SizedBox(width: 20),
                     _buildSocialButton(
                       imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b8/2021_Facebook_icon.svg/2048px-2021_Facebook_icon.svg.png",
                       fallbackIcon: Icons.facebook,
                       isFacebook: true,
+                      onTap: () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text("Facebook sign-in not wired yet.")),
+                        );
+                      },
                     ),
                   ],
                 ),
@@ -411,24 +482,31 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
     required String imageUrl,
     required IconData fallbackIcon,
     bool isFacebook = false,
+    VoidCallback? onTap,
+    bool showSpinner = false,
   }) {
-    return Container(
-      width: 52,
-      height: 52,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.grey.shade300),
-        color: Colors.white,
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Image.network(
-          imageUrl,
-          errorBuilder: (context, error, stackTrace) => Icon(
-            fallbackIcon, 
-            color: isFacebook ? Colors.blue : Colors.grey,
-            size: 28,
-          ),
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        width: 52,
+        height: 52,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.grey.shade300),
+          color: Colors.white,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: showSpinner
+              ? const CircularProgressIndicator(strokeWidth: 2.5)
+              : Image.network(
+                  imageUrl,
+                  errorBuilder: (context, error, stackTrace) => Icon(
+                    fallbackIcon, 
+                    color: isFacebook ? Colors.blue : Colors.grey,
+                    size: 28,
+                  ),
+                ),
         ),
       ),
     );

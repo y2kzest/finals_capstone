@@ -56,6 +56,11 @@ class _SignupPageState extends State<SignupPage> {
       return;
     }
 
+    if (password.length < 6) {
+      _showSnackBar("Password must be at least 6 characters.");
+      return;
+    }
+
     if (password != confirmPassword) {
       _showSnackBar("Passwords do not match.");
       return;
@@ -71,14 +76,12 @@ class _SignupPageState extends State<SignupPage> {
           password: password,
         );
 
-        if (res.session != null) {
-          _showSnackBar("Sign up successful! Please check your email to verify your account.");
+        if (res.user != null) {
+          _showSnackBar("Success! Check your email for the verification link.");
           if (mounted) {
-            // Navigate back to login page
-            Navigator.of(context).pop(); 
+            Navigator.of(context).pop();
           }
         } else {
-          // Fallback for failed signup
           _showSnackBar("Sign up failed. Please try again.");
         }
       } else {
@@ -102,8 +105,10 @@ class _SignupPageState extends State<SignupPage> {
         }
       }
     } on AuthException catch (e) {
-      // Check for specific Supabase errors, e.g., 'Phone signups are disabled'
-      _showSnackBar("Sign Up Error: ${e.message}");
+      final message = e.message.toLowerCase().contains('rate limit')
+          ? 'Too many sign up attempts. Check your inbox for a previous email or wait a minute before trying again.'
+          : "Sign Up Error: ${e.message}";
+      _showSnackBar(message);
     } catch (e) {
       _showSnackBar("An unexpected error occurred: $e");
     } finally {

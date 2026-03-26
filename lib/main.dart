@@ -1,7 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'verification/otp.dart'; // Corrected import
 import 'bahay.dart'; 
@@ -31,11 +33,18 @@ Future<void> main() async {
   } else {
     // Mobile and Desktop: load .env file
     await dotenv.load(fileName: ".env");
-    
-    // **ACTION REQUIRED:** Ensure your .env file is loaded correctly for non-web environments
+
+    final envUrl = dotenv.env['SUPABASE_URL'];
+    final envAnon = dotenv.env['SUPABASE_ANON_KEY'];
+
+    // Guard against missing/empty env values to avoid a runtime crash before UI shows
+    if (envUrl == null || envUrl.isEmpty || envAnon == null || envAnon.isEmpty) {
+      throw StateError('Missing SUPABASE_URL or SUPABASE_ANON_KEY in .env');
+    }
+
     await Supabase.initialize(
-      url: dotenv.env['SUPABASE_URL']!, 
-      anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
+      url: envUrl,
+      anonKey: envAnon,
     );
   }
 
@@ -81,11 +90,29 @@ class _LoginPageState extends State<LoginPage> {
   bool _obscurePassword = true;
   bool _agree = false;
   bool _isLoading = false;
+  bool _isOAuthLoading = false;
+  bool _navigatedAfterAuth = false;
+  late final StreamSubscription<AuthState> _authSub;
 
   // Primary design color (Standard Blue for links/focus)
   static const Color kPrimaryBlue = Color(0xFF1E88E5); 
   // Darker Blue for the main button and branding
   static const Color kButtonBlue = Color(0xFF334D8C); 
+
+  @override
+  void initState() {
+    super.initState();
+    _authSub = supabase.auth.onAuthStateChange.listen((data) {
+      if (data.event == AuthChangeEvent.signedIn && !_navigatedAfterAuth) {
+        _navigatedAfterAuth = true;
+        if (!mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const Bahay()),
+        );
+      }
+    });
+  }
 
   // Helper to check if input is likely an email (contains '@' and '.')
   bool _isEmail(String input) {
@@ -216,6 +243,7 @@ class _LoginPageState extends State<LoginPage> {
       // Check if a session was successfully created
       if (res.session != null) {
         if (!mounted) return;
+        _navigatedAfterAuth = true;
         
         // Clear text fields on successful login
         _emailOrPhoneController.clear();
@@ -248,18 +276,53 @@ class _LoginPageState extends State<LoginPage> {
       );
     }
   }
+
+  Future<void> _signInWithGoogle() async {
+    if (!_agree) {
+      _showSnackBar("Please agree to the terms and policies before signing in.");
+      return;
+    }
+
+    setState(() {
+      _isOAuthLoading = true;
+    });
+
+    final redirectUrl = kIsWeb
+        ? '${Uri.base.origin}/#/auth-callback'
+        : 'io.supabase.flutter://login-callback';
+
+    try {
+      await supabase.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: redirectUrl,
+      );
+
+      _showSnackBar("Complete Google sign-in in the browser; you'll return automatically.");
+    } on AuthException catch (e) {
+      _showSnackBar("Google sign-in failed: ${e.message}");
+    } catch (e) {
+      _showSnackBar("An unexpected error occurred: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isOAuthLoading = false;
+        });
+      }
+    }
+  }
   
   // 🎯 Clean up controllers when the widget is disposed
   @override
   void dispose() {
     _emailOrPhoneController.dispose();
     _passwordController.dispose();
+    _authSub.cancel();
     super.dispose();
   }
 
   // Function to navigate directly to the Seller Business Info Page
   void _navigateToSellerSignup() {
-    print('Navigating to FillBusinessInfoPage for Seller');
+    debugPrint('Navigating to FillBusinessInfoPage for Seller');
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -270,7 +333,7 @@ class _LoginPageState extends State<LoginPage> {
 
   // Function to navigate to the Buyer/Standard Signup Page
   void _navigateToBuyerSignup() {
-    print('Navigating to SignupPage as Buyer');
+    debugPrint('Navigating to SignupPage as Buyer');
     // Note: Since SignupPage is now in lib/signup_page.dart, we need to import it properly
     Navigator.push(
       context,
@@ -340,14 +403,8 @@ class _LoginPageState extends State<LoginPage> {
   }
 
 
-  // Function to show a role selection dialog on sign up
-  void _signUpPageNavigation() {
-    _navigateToBuyerSignup();
-  }
-
-
   // Widget to build social login buttons (Moved into State for context access)
-  Widget _buildSocialButton(String imageUrl, VoidCallback onTap) {
+  Widget _buildSocialButton(String imageUrl, VoidCallback? onTap, {bool showSpinner = false}) {
     return InkWell(
       onTap: onTap,
       child: Container(
@@ -359,7 +416,7 @@ class _LoginPageState extends State<LoginPage> {
           border: Border.all(color: Colors.grey.shade300, width: 1),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.1),
+              color: Colors.black.withValues(alpha: 0.1),
               blurRadius: 4,
               offset: const Offset(0, 2),
             ),
@@ -367,12 +424,14 @@ class _LoginPageState extends State<LoginPage> {
         ),
         child: Padding(
           padding: const EdgeInsets.all(12.0),
-          child: Image.network(
-            imageUrl,
-            fit: BoxFit.contain,
-            // Fallback icon if image fails to load
-            errorBuilder: (context, error, stackTrace) => const Icon(Icons.person, color: Colors.grey),
-          ),
+          child: showSpinner
+              ? const CircularProgressIndicator(strokeWidth: 2.5)
+              : Image.network(
+                  imageUrl,
+                  fit: BoxFit.contain,
+                  // Fallback icon if image fails to load
+                  errorBuilder: (context, error, stackTrace) => const Icon(Icons.person, color: Colors.grey),
+                ),
         ),
       ),
     );
@@ -656,17 +715,14 @@ Widget build(BuildContext context) {
                 children: [
                   _buildSocialButton(
                     'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/1024px-Google_%22G%22_logo.svg.png',
-                    () {
-                      // TODO: Implement Google sign-in using Supabase
-                      _showSnackBar("Google Sign-in clicked (Not yet implemented)");
-                    },
+                    _isOAuthLoading ? null : _signInWithGoogle,
+                    showSpinner: _isOAuthLoading,
                   ),
                   const SizedBox(width: 24),
                   _buildSocialButton(
                     'https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/Facebook_Logo_%282019%29.png/1024px-Facebook_Logo_%282019%29.png',
                     () {
-                      // TODO: Implement Facebook sign-in using Supabase
-                      _showSnackBar("Facebook Sign-in clicked (Not yet implemented)");
+                      _showSnackBar("Facebook Sign-in not wired yet.");
                     },
                   ),
                 ],

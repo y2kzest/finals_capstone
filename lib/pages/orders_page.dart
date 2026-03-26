@@ -49,7 +49,7 @@ class OrdersPage extends StatelessWidget {
                   ),
                   child: ListView.separated(
                     itemCount: orders.length,
-                    separatorBuilder: (_, __) => Divider(color: Colors.grey[300]),
+                    separatorBuilder: (context, index) => Divider(color: Colors.grey[300]),
                     itemBuilder: (context, index) {
                       final order = orders[index];
                       bool isPickup = order["status"] == "Pick up";

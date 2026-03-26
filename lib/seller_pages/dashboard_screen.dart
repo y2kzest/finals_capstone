@@ -117,9 +117,9 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
         });
       }
     } on PostgrestException catch (e) {
-      print('Dashboard Data Fetch Error: ${e.message}');
+      debugPrint('Dashboard Data Fetch Error: ${e.message}');
     } catch (e) {
-      print('An unexpected error occurred: $e');
+      debugPrint('An unexpected error occurred: $e');
     } finally {
       if (mounted) {
         setState(() {
@@ -198,7 +198,7 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
                       Container(
                         height: 50,
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.2),
+                          color: Colors.white.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(15),
                         ),
                         child: const TextField(
@@ -340,7 +340,7 @@ class DashboardCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: kPrimaryBlue.withOpacity(0.1), // Used primary color for accent
+                  color: kPrimaryBlue.withValues(alpha: 0.1), // Used primary color for accent
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(icon, size: 30, color: kPrimaryBlue), // Used primary color for icon

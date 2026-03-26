@@ -61,7 +61,7 @@ class _AddProductPageState extends State<AddProductPage> {
       // Get public URL
       return supabase.storage.from('products').getPublicUrl(fileName);
     } catch (e) {
-      print("UPLOAD ERROR → $e");
+      debugPrint("UPLOAD ERROR → $e");
       return null;
     }
   }
@@ -84,6 +84,7 @@ class _AddProductPageState extends State<AddProductPage> {
       imageUrl = await uploadImage();
 
       if (imageUrl == null) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Failed to upload image.")),
         );
@@ -105,12 +106,14 @@ class _AddProductPageState extends State<AddProductPage> {
     try {
       await supabase.from('product').insert(productData);
 
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Product added successfully!")),
       );
 
       Navigator.pop(context);
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Error: $e")),
       );

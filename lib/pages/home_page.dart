@@ -34,7 +34,7 @@ class _HomePageState extends State<HomePage> {
         isLoading = false;
       });
     } catch (e) {
-      print("FETCH ERROR → $e");
+      debugPrint("FETCH ERROR → $e");
       setState(() => isLoading = false);
     }
   }
@@ -70,17 +70,20 @@ class _HomePageState extends State<HomePage> {
                       : ListView.builder(
                           scrollDirection: Axis.horizontal,
                           itemCount: products.length,
-                          itemBuilder: (_, i) {
+                          itemBuilder: (context, i) {
                             final p = products[i];
+
+                            final imageUrl = (p['image_url'] as String?)?.trim();
+                            final resolvedImage =
+                                (imageUrl == null || imageUrl.isEmpty) ? _defaultAssetPath : imageUrl;
+
+                            final priceValue = p['price'];
+                            final priceText = priceValue != null ? "₱$priceValue /kg" : "₱0";
 
                             return ProductCard(
                               title: p['product_name'] ?? "Juan Store",
-                              price: p['price'] != null
-                                  ? "₱${p['price']} /kg"
-                                  : "₱0",
-                              
-                              // Pass the product image URL, or the default asset path if null
-                              imageUrl: p[''] ?? _defaultAssetPath,
+                              price: priceText,
+                              imageUrl: resolvedImage,
                             );
                           },
                         ),
@@ -185,7 +188,7 @@ class ProductCard extends StatelessWidget {
         width: double.infinity,
         fit: BoxFit.cover,
         // Optional: fallback to a text placeholder if the asset is missing
-        errorBuilder: (_, __, ___) => const Center(child: Text('Asset Error')),
+        errorBuilder: (context, error, stackTrace) => const Center(child: Text('Asset Error')),
       );
     } else {
       // Use Image.network for URLs (Supabase)
@@ -195,7 +198,7 @@ class ProductCard extends StatelessWidget {
         width: double.infinity,
         fit: BoxFit.cover,
         // Fallback to a local asset image if the network request fails
-        errorBuilder: (_, __, ___) => Image.asset(
+        errorBuilder: (context, error, stackTrace) => Image.asset(
           "assets/img/kasim.png", // Your specified asset as the network fallback
           height: 100,
           width: double.infinity,
@@ -213,7 +216,7 @@ class ProductCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: Colors.grey.withValues(alpha: 0.1),
             blurRadius: 8,
             offset: const Offset(0, 2),
           )

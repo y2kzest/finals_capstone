@@ -7,6 +7,10 @@ class ProductViewPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final displayName = (product['name'] ?? product['product_name'] ?? 'Unknown product').toString();
+    final priceRaw = product['price'] ?? product['price_per_kg'];
+    final priceValue = double.tryParse(priceRaw?.toString() ?? '') ?? 0;
+
     return Scaffold(
       backgroundColor: const Color(0xFFF7F7F7),
       body: SafeArea(
@@ -68,7 +72,7 @@ class ProductViewPage extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        product['name'],
+                        displayName,
                         style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                       ),
 
@@ -78,7 +82,7 @@ class ProductViewPage extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            "₱${product['price']}/KG",
+                            "₱$priceValue/KG",
                             style: const TextStyle(
                                 fontSize: 16,
                                 color: Color(0xFF1A3C8C),
@@ -116,23 +120,28 @@ class ProductViewPage extends StatelessWidget {
                                   return;
                                 }
 
-                                // Insert into Supabase cart table
-                                final response = await supabase.from('cart').insert({
-                                  'product_name': product['name'],
-                                  'price': double.tryParse(product['price'].toString()) ?? 0,
-                                  'qty': 1,
-                                });
+                                try {
+                                  await supabase.from('cart').insert({
+                                    'product_name': displayName,
+                                    'price': priceValue,
+                                    'qty': 1,
+                                    'user_id': user.id,
+                                  });
 
-                                if (response.error == null) {
+                                  if (!context.mounted) return;
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
                                         content: Text("Added to cart successfully!")),
                                   );
-                                } else {
+                                } on PostgrestException catch (e) {
+                                  if (!context.mounted) return;
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                        content: Text(
-                                            "Error: ${response.error!.message}")),
+                                    SnackBar(content: Text("Error: ${e.message}")),
+                                  );
+                                } catch (e) {
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text("Error: $e")),
                                   );
                                 }
                               },
@@ -166,22 +175,28 @@ class ProductViewPage extends StatelessWidget {
                                   return;
                                 }
 
-                                final response = await supabase.from('orders').insert({
-                                  'product_name': product['name'],
-                                  'price': double.tryParse(product['price'].toString()) ?? 0,
-                                  'qty': 1,
-                                });
+                                try {
+                                  await supabase.from('orders').insert({
+                                    'product_name': displayName,
+                                    'price': priceValue,
+                                    'qty': 1,
+                                    'buyer_id': buyerId,
+                                  });
 
-                                if (response.error == null) {
+                                  if (!context.mounted) return;
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
                                         content: Text("Order submitted!")),
                                   );
-                                } else {
+                                } on PostgrestException catch (e) {
+                                  if (!context.mounted) return;
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                        content: Text(
-                                            "Error: ${response.error!.message}")),
+                                    SnackBar(content: Text("Error: ${e.message}")),
+                                  );
+                                } catch (e) {
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text("Error: $e")),
                                   );
                                 }
                               },

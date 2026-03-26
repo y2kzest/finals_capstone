@@ -79,18 +79,19 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
             onConflict: 'user_id',
           );
 
+      if (!context.mounted) return;
       _showActionSnackbar(context, "Profile submitted successfully!", isError: false);
 
       // Navigate to the final Seller Dashboard (SellerHomePage) and clear navigation history
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const ShopDashboardScreen()),
-        );
-      }
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const ShopDashboardScreen()),
+      );
     } on PostgrestException catch (e) {
+      if (!context.mounted) return;
       _showActionSnackbar(context, "Database Error: ${e.message}", isError: true);
     } catch (e) {
+      if (!context.mounted) return;
       _showActionSnackbar(context, "An unexpected error occurred: $e", isError: true);
     }
   }
@@ -240,7 +241,7 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
           keyboardType: keyboardType,
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: TextStyle(color: kTextGrey.withOpacity(0.7)),
+            hintStyle: TextStyle(color: kTextGrey.withValues(alpha: 0.7)),
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             filled: true,
             fillColor: Colors.white,

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'main.dart'; 
-import 'seller_pages/dashboard_screen.dart'; 
 
 const Color kDeepBlue = Color(0xFF1E3A8A);
 
@@ -66,7 +65,7 @@ class _ProfileState extends State<Profile> {
         });
       }
     } on PostgrestException catch (e) {
-      print('Profile fetch failed: ${e.message}. Attempting to create profile.');
+      debugPrint('Profile fetch failed: ${e.message}. Attempting to create profile.');
       
       final defaultName = userEmail.split('@')[0];
       
@@ -95,7 +94,7 @@ class _ProfileState extends State<Profile> {
           String message = "Error creating profile: ${e.message}";
           
           if (e.message.contains('violates row-level security policy')) {
-            print('⚠️ REMINDER: Check INSERT RLS policy on the profile table in Supabase!');
+            debugPrint('⚠️ REMINDER: Check INSERT RLS policy on the profile table in Supabase!');
             message = "Profile creation failed due to security policy. (Check Supabase RLS)";
           }
           

@@ -16,12 +16,19 @@ class _CartPageState extends State<CartPage> {
     final user = supabase.auth.currentUser;
     if (user == null) return [];
 
-    final response = await supabase
-        .from('cart')
-        .select()
-        .order('id', ascending: false);
+    try {
+      final response = await supabase
+          .from('cart')
+          .select()
+          .eq('user_id', user.id)
+          .order('id', ascending: false);
 
-    return response;
+      return response;
+    } catch (e) {
+      // Surface a lightweight error to the UI while keeping the page usable
+      debugPrint('Cart load error: $e');
+      return [];
+    }
   }
 
   @override
