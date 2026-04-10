@@ -35,9 +35,14 @@ tasks.register<Delete>("clean") {
 
 // Standard Kotlin configuration for all subprojects (ensures Java compatibility)
 subprojects {
+    project.tasks.withType<JavaCompile>().configureEach {
+        sourceCompatibility = "17"
+        targetCompatibility = "17"
+    }
+
     project.tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
         kotlinOptions {
-            jvmTarget = "11"
+            jvmTarget = "17"
         }
     }
 }
