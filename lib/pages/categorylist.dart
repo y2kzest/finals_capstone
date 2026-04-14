@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'productlist.dart';
+import 'productdet.dart';
 
 class CategoryListPage extends StatefulWidget {
   final String category;
@@ -16,12 +16,6 @@ class _CategoryListPageState extends State<CategoryListPage> {
   String _greetingName = 'Shopper';
   String _selectedSort = 'Popular';
 
-  final List<String> _fishSortOptions = const [
-    'Popular',
-    'Low Price',
-    'Small Fishes',
-    'Big Fishes',
-  ];
   final List<String> _defaultSortOptions = const ['Popular', 'Low Price'];
 
   @override
@@ -75,12 +69,42 @@ class _CategoryListPageState extends State<CategoryListPage> {
       case 'Fishes':
       case 'Meats & Fishes':
         return const [
-          _CategoryProduct(name: 'Dalagang bukid', price: 230),
-          _CategoryProduct(name: 'Bangus', price: 220),
-          _CategoryProduct(name: 'Tilapia', price: 180),
-          _CategoryProduct(name: 'Hipon', price: 350),
-          _CategoryProduct(name: 'Galunggong', price: 160),
-          _CategoryProduct(name: 'Pusit', price: 320),
+          _CategoryProduct(
+            name: 'Dalagang bukid',
+            price: 230,
+            description:
+                'A flavorful reef fish with tender meat, great for frying.',
+          ),
+          _CategoryProduct(
+            name: 'Bangus',
+            price: 220,
+            description:
+                'Milkfish commonly used for grilling, sinigang, or paksiw.',
+          ),
+          _CategoryProduct(
+            name: 'Tilapia',
+            price: 180,
+            description:
+                'A mild and affordable fish that is easy to cook in many styles.',
+          ),
+          _CategoryProduct(
+            name: 'Hipon',
+            price: 350,
+            description:
+                'Fresh shrimp ideal for stir-fry, soups, and buttered dishes.',
+          ),
+          _CategoryProduct(
+            name: 'Galunggong',
+            price: 160,
+            description:
+                'A local favorite often pan-fried and served with vinegar dip.',
+          ),
+          _CategoryProduct(
+            name: 'Pusit',
+            price: 320,
+            description:
+                'Squid with a sweet taste, perfect for adobo, ihaw, or calamares.',
+          ),
         ];
       case 'Meats':
         return const [
@@ -119,12 +143,7 @@ class _CategoryListPageState extends State<CategoryListPage> {
     }
   }
 
-  List<String> _activeSortOptions() {
-    if (widget.category == 'Fishes' || widget.category == 'Meats & Fishes') {
-      return _fishSortOptions;
-    }
-    return _defaultSortOptions;
-  }
+  List<String> _activeSortOptions() => _defaultSortOptions;
 
   List<_CategoryProduct> _productsForSort(String sort) {
     final items = List<_CategoryProduct>.from(_baseProductsForCategory());
@@ -134,31 +153,23 @@ class _CategoryListPageState extends State<CategoryListPage> {
       return items;
     }
 
-    if (sort == 'Small Fishes') {
-      final smallFishKeywords = {'dalagang', 'tilapia', 'galunggong'};
-      final filtered = items.where((item) {
-        final lowerName = item.name.toLowerCase();
-        return smallFishKeywords.any(lowerName.contains);
-      }).toList();
-      return filtered.isEmpty ? items : filtered;
-    }
-
-    if (sort == 'Big Fishes') {
-      final bigFishKeywords = {'bangus', 'hipon', 'pusit'};
-      final filtered = items.where((item) {
-        final lowerName = item.name.toLowerCase();
-        return bigFishKeywords.any(lowerName.contains);
-      }).toList();
-      return filtered.isEmpty ? items : filtered;
-    }
-
     return items;
   }
 
-  void _openProductList() {
+  void _openProductDetails(_CategoryProduct product) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => const ProductListPage()),
+      MaterialPageRoute(
+        builder: (context) => ProductViewPage(
+          product: {
+            'name': product.name,
+            'price': product.price,
+            'description': product.description,
+            'seller_name': 'Lienda Public Market Stall',
+            'market_location': widget.category,
+          },
+        ),
+      ),
     );
   }
 
@@ -166,6 +177,57 @@ class _CategoryListPageState extends State<CategoryListPage> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text('$name added to cart')));
+  }
+
+  Future<void> _addToCart(_CategoryProduct product) async {
+    final client = Supabase.instance.client;
+    final user = client.auth.currentUser;
+
+    if (user == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please login first.')));
+      return;
+    }
+
+    try {
+      final existing = await client
+          .from('cart')
+          .select('id, qty')
+          .eq('buyer_id', user.id)
+          .eq('product_name', product.name)
+          .maybeSingle();
+
+      if (existing != null) {
+        final currentQty = int.tryParse(existing['qty'].toString()) ?? 1;
+        await client
+            .from('cart')
+            .update({'qty': currentQty + 1})
+            .eq('id', existing['id'])
+            .eq('buyer_id', user.id);
+      } else {
+        await client.from('cart').insert({
+          'product_name': product.name,
+          'price': product.price,
+          'qty': 1,
+          'buyer_id': user.id,
+        });
+      }
+
+      if (!mounted) return;
+      _showAddedMessage(product.name);
+    } on PostgrestException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Database error: ${e.message}')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to add item: $e')));
+    }
   }
 
   @override
@@ -334,8 +396,8 @@ class _CategoryListPageState extends State<CategoryListPage> {
                 return CategoryItemCard(
                   title: product.name,
                   price: '₱${product.price}',
-                  onTap: _openProductList,
-                  onAddTap: () => _showAddedMessage(product.name),
+                  onTap: () => _openProductDetails(product),
+                  onAddTap: () => _addToCart(product),
                 );
               },
             ),
@@ -435,6 +497,11 @@ class CategoryItemCard extends StatelessWidget {
 class _CategoryProduct {
   final String name;
   final int price;
+  final String description;
 
-  const _CategoryProduct({required this.name, required this.price});
+  const _CategoryProduct({
+    required this.name,
+    required this.price,
+    this.description = '',
+  });
 }

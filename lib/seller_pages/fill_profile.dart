@@ -16,14 +16,18 @@ class BusinessProfileScreen extends StatefulWidget {
 
 class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
   // Controllers for input fields
-  final TextEditingController _storeInfoController =
-      TextEditingController(text: 'The Ultimate Bazaar');
-  final TextEditingController _stallNumberController =
-      TextEditingController(text: 'Stall 4A');
-  final TextEditingController _storeAddressController =
-      TextEditingController(text: '123 Market Street, Downtown Area');
-  final TextEditingController _contactEmailController =
-      TextEditingController(text: 'official@ultimatebazaar.com');
+  final TextEditingController _storeInfoController = TextEditingController(
+    text: 'The Ultimate Bazaar',
+  );
+  final TextEditingController _stallNumberController = TextEditingController(
+    text: 'Stall 4A',
+  );
+  final TextEditingController _storeAddressController = TextEditingController(
+    text: '123 Market Street, Downtown Area',
+  );
+  final TextEditingController _contactEmailController = TextEditingController(
+    text: 'official@ultimatebazaar.com',
+  );
 
   @override
   void dispose() {
@@ -34,7 +38,11 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
     super.dispose();
   }
 
-  void _showActionSnackbar(BuildContext context, String action, {bool isError = false}) {
+  void _showActionSnackbar(
+    BuildContext context,
+    String action, {
+    bool isError = false,
+  }) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(action),
@@ -50,16 +58,29 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
     final userId = supabase.auth.currentUser?.id;
 
     if (userId == null) {
-      _showActionSnackbar(context, "Authentication Error. Please log in again.", isError: true);
+      _showActionSnackbar(
+        context,
+        "Authentication Error. Please log in again.",
+        isError: true,
+      );
       return;
     }
 
-    if (_storeInfoController.text.isEmpty || _storeAddressController.text.isEmpty) {
-      _showActionSnackbar(context, "Please fill in all required fields (*).", isError: true);
+    if (_storeInfoController.text.isEmpty ||
+        _storeAddressController.text.isEmpty) {
+      _showActionSnackbar(
+        context,
+        "Please fill in all required fields (*).",
+        isError: true,
+      );
       return;
     }
 
-    _showActionSnackbar(context, "Finalizing profile submission...", isError: false);
+    _showActionSnackbar(
+      context,
+      "Finalizing profile submission...",
+      isError: false,
+    );
 
     try {
       // Collect the remaining profile data
@@ -69,18 +90,22 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
         'stall_number': _stallNumberController.text,
         'store_address': _storeAddressController.text,
         'official_contact_email': _contactEmailController.text,
-        'is_profile_finalized': true, // Mark the entire profile creation as complete
+        'is_profile_finalized':
+            true, // Mark the entire profile creation as complete
       };
 
       // Update the existing seller profile record with the final details
       // It uses the same table 'seller_profiles' from fill_business_info.dart
-      await supabase.from('seller_profiles').upsert(
-            finalProfileData,
-            onConflict: 'user_id',
-          );
+      await supabase
+          .from('seller_profiles')
+          .upsert(finalProfileData, onConflict: 'user_id');
 
       if (!context.mounted) return;
-      _showActionSnackbar(context, "Profile submitted successfully!", isError: false);
+      _showActionSnackbar(
+        context,
+        "Profile submitted successfully!",
+        isError: false,
+      );
 
       // Navigate to the final Seller Dashboard (SellerHomePage) and clear navigation history
       Navigator.pushReplacement(
@@ -89,17 +114,25 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
       );
     } on PostgrestException catch (e) {
       if (!context.mounted) return;
-      _showActionSnackbar(context, "Database Error: ${e.message}", isError: true);
+      _showActionSnackbar(
+        context,
+        "Database Error: ${e.message}",
+        isError: true,
+      );
     } catch (e) {
       if (!context.mounted) return;
-      _showActionSnackbar(context, "An unexpected error occurred: $e", isError: true);
+      _showActionSnackbar(
+        context,
+        "An unexpected error occurred: $e",
+        isError: true,
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFF7F8FC),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -122,68 +155,93 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Title
-              const Text(
-                "Business Profile",
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: kPrimaryBlue,
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  color: kPrimaryBlue.withValues(alpha: 0.08),
+                  border: Border.all(
+                    color: kPrimaryBlue.withValues(alpha: 0.2),
+                  ),
+                ),
+                child: const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Business Profile",
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: kPrimaryBlue,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      "Complete your final seller details before dashboard activation.",
+                      style: TextStyle(color: kTextGrey, fontSize: 13),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 4),
-              const Text(
-                "Complete the store and business information that will be registered.",
-                style: TextStyle(color: kTextGrey, fontSize: 14),
-              ),
 
-              const SizedBox(height: 32),
+              const SizedBox(height: 18),
 
-              // Section header
-              const Text(
-                "General Information",
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                  color: Colors.black87
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.grey.shade200),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
                 ),
-              ),
-
-              const SizedBox(height: 16),
-
-              // Store name input
-              _buildTextField(
-                label: "Store Description / Information *",
-                controller: _storeInfoController,
-                hint: "Provide a short description of your store or services",
-                maxLines: 3,
-              ),
-
-              const SizedBox(height: 20),
-
-              _buildTextField(
-                label: "Stall Number",
-                controller: _stallNumberController,
-                hint: "e.g., Kiosk 2B or Stall 4A",
-              ),
-
-              const SizedBox(height: 20),
-
-              // Store address section
-              _buildTextField(
-                label: "Store/Office Address *",
-                controller: _storeAddressController,
-                hint: "Full operational address",
-              ),
-              
-              const SizedBox(height: 20),
-
-              // Official Contact Email
-              _buildTextField(
-                label: "Official Contact Email *",
-                controller: _contactEmailController,
-                hint: "e.g., contact@yourstore.com",
-                keyboardType: TextInputType.emailAddress,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "General Information",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    _buildTextField(
+                      label: "Store Description / Information *",
+                      controller: _storeInfoController,
+                      hint:
+                          "Provide a short description of your store or services",
+                      maxLines: 3,
+                    ),
+                    const SizedBox(height: 20),
+                    _buildTextField(
+                      label: "Stall Number",
+                      controller: _stallNumberController,
+                      hint: "e.g., Kiosk 2B or Stall 4A",
+                    ),
+                    const SizedBox(height: 20),
+                    _buildTextField(
+                      label: "Store/Office Address *",
+                      controller: _storeAddressController,
+                      hint: "Full operational address",
+                    ),
+                    const SizedBox(height: 20),
+                    _buildTextField(
+                      label: "Official Contact Email *",
+                      controller: _contactEmailController,
+                      hint: "e.g., contact@yourstore.com",
+                      keyboardType: TextInputType.emailAddress,
+                    ),
+                  ],
+                ),
               ),
 
               const SizedBox(height: 40),
@@ -194,7 +252,7 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
                 height: 54,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: kPrimaryBlue, 
+                    backgroundColor: kPrimaryBlue,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
                     ),
@@ -232,7 +290,11 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
       children: [
         Text(
           label,
-          style: const TextStyle(fontSize: 14, color: Colors.black, fontWeight: FontWeight.w600),
+          style: const TextStyle(
+            fontSize: 14,
+            color: Colors.black,
+            fontWeight: FontWeight.w600,
+          ),
         ),
         const SizedBox(height: 8),
         TextFormField(
@@ -242,7 +304,10 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
           decoration: InputDecoration(
             hintText: hint,
             hintStyle: TextStyle(color: kTextGrey.withValues(alpha: 0.7)),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 12,
+            ),
             filled: true,
             fillColor: Colors.white,
             border: OutlineInputBorder(

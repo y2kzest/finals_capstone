@@ -2,10 +2,10 @@
 
 import 'package:flutter/material.dart';
 // IMPORTANT: Add these imports for navigation
-import 'package:caps_finals/main.dart'; 
+import 'package:caps_finals/main.dart';
 import 'seller_signin.dart';
 
-// Define the primary color constant 
+// Define the primary color constant
 const Color kPrimaryColor = Color(0xFF283A97);
 
 void main() {
@@ -48,7 +48,6 @@ class MainScreen extends StatelessWidget {
 }
 // ----------------------------------------------
 
-
 // --- Placeholder for fill_business_info.dart ---
 // DELETE THIS SECTION if fill_business_info.dart is already a separate file!
 class FillBusinessInfoScreen extends StatelessWidget {
@@ -58,12 +57,13 @@ class FillBusinessInfoScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Fill Business Info')),
-      body: const Center(child: Text('Navigated to Fill Business Info Screen.')),
+      body: const Center(
+        child: Text('Navigated to Fill Business Info Screen.'),
+      ),
     );
   }
 }
 // ----------------------------------------------
-
 
 class ActivateQuickcartScreen extends StatelessWidget {
   const ActivateQuickcartScreen({super.key});
@@ -90,71 +90,129 @@ class ActivateQuickcartScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            // Placeholder for the image
-            // Replace the entire placeholder block with this:
-Center(
-  child: ClipRRect( // Used to apply the rounded corners
-    borderRadius: BorderRadius.circular(12),
-    child: Image.asset(
-      'assets/img/logo.png', // Change this path to your image file
-      width: 125,
-      height: 125,
-      fit: BoxFit.cover, // Ensures the image fills the space
-    ),
-  ),
-),
-            const SizedBox(height: 30),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                color: kPrimaryColor.withValues(alpha: 0.06),
+                border: Border.all(
+                  color: kPrimaryColor.withValues(alpha: 0.15),
+                ),
+              ),
+              child: Column(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.asset(
+                      'assets/img/logo.png',
+                      width: 96,
+                      height: 96,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Start selling with Quickcart Merchant',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: kPrimaryColor,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Grow your business and handle orders faster with a streamlined seller setup.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 13, color: Colors.black54),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
 
-            // Growth text
             const Text(
-              'Grow your business and boost your sales by\nusing Quickcart Merchant features:',
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.black54,
+              'Merchant features',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.grey.shade200),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  _buildFeatureItem('Accept Quickcart orders automatically'),
+                  _buildFeatureItem('Change menu and price anytime you want'),
+                  _buildFeatureItem(
+                    'Track payouts and earnings with confidence',
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 20),
 
-            // Features list
-            _buildFeatureItem('Accept Quickcart orders automatically'),
-            _buildFeatureItem('Change menu and price anytime you want'),
-            _buildFeatureItem('Reload your account anytime you want'),
-            const SizedBox(height: 10),
-
-            // How to activate section
             const Text(
               'How to activate',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.grey.shade200),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 15),
-
-            // Activation Steps (Timeline)
-            _buildStepItem(
-              context,
-              stepNumber: 1,
-              title: 'Fill in the form and submit',
-              subtitle: 'You will submit all business details, ID Card, legal documents, menu and food photo',
-              isFirst: true,
-            ),
-            _buildStepItem(
-              context,
-              stepNumber: 2,
-              title: 'Wait for approval',
-              subtitle: 'Automatic bank transfer of earnings from Quickcart every day',
-            ),
-            _buildStepItem(
-              context,
-              stepNumber: 3,
-              title: 'Activate your store',
-              subtitle: 'On the Orders page, toggle the status from "Paused" to "Open" to begin receiving orders.',
-              isLast: true,
+              child: Column(
+                children: [
+                  _buildStepItem(
+                    context,
+                    stepNumber: 1,
+                    title: 'Fill in the form and submit',
+                    subtitle:
+                        'Submit business details, ID card, legal documents, and product photos.',
+                    isFirst: true,
+                  ),
+                  _buildStepItem(
+                    context,
+                    stepNumber: 2,
+                    title: 'Wait for approval',
+                    subtitle:
+                        'Our team reviews your submission and verifies your business profile.',
+                  ),
+                  _buildStepItem(
+                    context,
+                    stepNumber: 3,
+                    title: 'Activate your store',
+                    subtitle:
+                        'Switch your store status from "Paused" to "Open" and start receiving orders.',
+                    isLast: true,
+                  ),
+                ],
+              ),
             ),
 
             const SizedBox(height: 10),
-            
+
             // Activation Button
             SizedBox(
               width: double.infinity,
@@ -176,7 +234,11 @@ Center(
                 ),
                 child: const Text(
                   'Activate',
-                  style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontSize: 18,
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ),
@@ -188,9 +250,7 @@ Center(
                 // NAVIGATE: Back to Sign In directs to main.dart
                 onTap: () {
                   Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(
-                      builder: (context) => const LoginPage(),
-                    ),
+                    MaterialPageRoute(builder: (context) => const LoginPage()),
                   );
                 },
                 child: Text.rich(
@@ -219,22 +279,13 @@ Center(
   // Helper methods remain the same, ensuring they use kPrimaryColor
   Widget _buildFeatureItem(String text) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Icon(
-            Icons.check_circle,
-            color: kPrimaryColor,
-            size: 24,
-          ),
+          Icon(Icons.check_circle, color: kPrimaryColor, size: 24),
           const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(fontSize: 14.5),
-            ),
-          ),
+          Expanded(child: Text(text, style: const TextStyle(fontSize: 14))),
         ],
       ),
     );
@@ -249,27 +300,35 @@ Center(
     bool isLast = false,
   }) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 25.0),
+      padding: const EdgeInsets.only(bottom: 18),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Column(
             children: <Widget>[
-              // Circle for the step
               Container(
-                width: 12,
-                height: 12,
+                width: 24,
+                height: 24,
+                alignment: Alignment.center,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: Colors.grey, width: 2),
+                  color: kPrimaryColor.withValues(alpha: 0.12),
+                  border: Border.all(color: kPrimaryColor, width: 1.4),
+                ),
+                child: Text(
+                  '$stepNumber',
+                  style: const TextStyle(
+                    color: kPrimaryColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 11,
+                  ),
                 ),
               ),
-              // Line connecting steps (omitted for the last step)
               if (!isLast)
                 Container(
                   width: 2,
-                  height: 100,
-                  color: Colors.grey,
+                  height: 74,
+                  color: kPrimaryColor.withValues(alpha: 0.22),
                 ),
             ],
           ),
@@ -282,16 +341,13 @@ Center(
                   title,
                   style: const TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: 14.5,
+                    fontSize: 14,
                   ),
                 ),
                 const SizedBox(height: 5),
                 Text(
                   subtitle,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: Colors.black54,
-                  ),
+                  style: const TextStyle(fontSize: 12.5, color: Colors.black54),
                 ),
               ],
             ),

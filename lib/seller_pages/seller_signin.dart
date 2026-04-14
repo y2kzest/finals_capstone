@@ -53,15 +53,27 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
 
     // Basic Validation
     if (email.isEmpty || password.isEmpty) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please fill in all fields")));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Please fill in all fields")),
+        );
+      }
       return;
     }
     if (password != confirmPassword) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Passwords do not match")));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text("Passwords do not match")));
+      }
       return;
     }
     if (!_agreedToTerms) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("You must agree to the terms")));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("You must agree to the terms")),
+        );
+      }
       return;
     }
 
@@ -76,66 +88,72 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
 
       // --- NEW LOGIC FOR HANDLING SUCCESSFUL SIGNUP ---
       if (res.session != null && res.user != null) {
-          // Case 1: Sign up successful AND user is immediately logged in (Email confirmation OFF)
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text("Sign up successful!"),
-                  backgroundColor: Color(0xFF25509E),
-                )
-            );
-            _navigatedAfterAuth = true;
-            // Navigate to the next step
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const FillBusinessInfoPage(),
-              ),
-            );
-          }
+        // Case 1: Sign up successful AND user is immediately logged in (Email confirmation OFF)
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Sign up successful!"),
+              backgroundColor: Color(0xFF25509E),
+            ),
+          );
+          _navigatedAfterAuth = true;
+          // Navigate to the next step
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const FillBusinessInfoPage(),
+            ),
+          );
+        }
       } else if (res.user != null && res.session == null) {
-          // Case 2: Sign up successful, but email confirmation is REQUIRED (Session is null)
-          if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text("Success! Please check your email for a confirmation link to activate your account and log in."),
-                    backgroundColor: Colors.orange,
-                  )
-              );
-          }
-          // The user is not logged in, so we stay on the sign-up page or navigate to a login page.
-          // Since they are not authenticated, they cannot proceed to FillBusinessInfoPage.
-          
+        // Case 2: Sign up successful, but email confirmation is REQUIRED (Session is null)
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                "Success! Please check your email for a confirmation link to activate your account and log in.",
+              ),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        // The user is not logged in, so we stay on the sign-up page or navigate to a login page.
+        // Since they are not authenticated, they cannot proceed to FillBusinessInfoPage.
       } else {
         // Fallback for unexpected successful response without user or session
-         if (mounted) {
-             ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text("Sign up succeeded, but status is unclear. Check your email or try logging in."),
-                    backgroundColor: Colors.orange,
-                  )
-              );
-          }
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                "Sign up succeeded, but status is unclear. Check your email or try logging in.",
+              ),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
       }
-      
     } on AuthException catch (e) {
       // This catches specific Supabase Auth errors (e.g., duplicate user, weak password)
-      debugPrint("SUPABASE AUTH ERROR: ${e.statusCode} | ${e.message}"); 
+      debugPrint("SUPABASE AUTH ERROR: ${e.statusCode} | ${e.message}");
       if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text("Error: ${e.message}"),
-              backgroundColor: Colors.red.shade700,
-          ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Error: ${e.message}"),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
       }
     } catch (e) {
       // This catches unexpected errors (e.g., network issues, initialization problems)
-      debugPrint("UNEXPECTED ERROR DURING SIGNUP: $e"); 
+      debugPrint("UNEXPECTED ERROR DURING SIGNUP: $e");
       if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              // Using the message you reported
-              content: Text("Sign up failed. Please try again."), 
-              backgroundColor: Colors.red,
-          ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            // Using the message you reported
+            content: Text("Sign up failed. Please try again."),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -145,7 +163,9 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
   Future<void> _signInWithGoogle() async {
     if (!_agreedToTerms) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("You must agree to the terms")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("You must agree to the terms")),
+        );
       }
       return;
     }
@@ -164,7 +184,11 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Complete Google sign-in in the browser; you'll return automatically.")),
+          const SnackBar(
+            content: Text(
+              "Complete Google sign-in in the browser; you'll return automatically.",
+            ),
+          ),
         );
       }
     } on AuthException catch (e) {
@@ -175,9 +199,9 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Unexpected error: $e")),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Unexpected error: $e")));
       }
     } finally {
       if (mounted) setState(() => _isOAuthLoading = false);
@@ -196,228 +220,270 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFF5F6FB),
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                
-                // --- Logo/Branding Section ---
-                Image.asset(
-                  "assets/img/logo.png",
-                  height: 200,
-                  fit: BoxFit.contain,
-                  errorBuilder: (context, error, stackTrace) {
-                    return const Text(
-                      "QUICKCART",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 32, 
-                        fontWeight: FontWeight.w900, 
-                        color: Color(0xFF6A7185),
+        child: GestureDetector(
+          onTap: () => FocusScope.of(context).unfocus(),
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 500),
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x22000000),
+                        blurRadius: 24,
+                        offset: Offset(0, 10),
                       ),
-                    );
-                  },
-                ),
-                const SizedBox(height: 48), 
-
-                // Email Field
-                _buildLabel("Email Address"),
-                const SizedBox(height: 8),
-                _buildTextField(
-                  controller: _emailController, // Connect Controller
-                  hint: "Enter your email address",
-                  inputType: TextInputType.emailAddress,
-                ),
-                const SizedBox(height: 20),
-
-                // Password Field
-                _buildLabel("Password"),
-                const SizedBox(height: 8),
-                _buildTextField(
-                  controller: _passwordController, // Connect Controller
-                  hint: "Enter your password",
-                  isPassword: true,
-                  obscureText: _obscurePassword,
-                  onVisibilityToggle: () {
-                    setState(() {
-                      _obscurePassword = !_obscurePassword;
-                    });
-                  },
-                ),
-                const SizedBox(height: 20),
-
-                // Confirm Password Field
-                _buildLabel("Confirm Password"),
-                const SizedBox(height: 8),
-                _buildTextField(
-                  controller: _confirmPasswordController, // Connect Controller
-                  hint: "Enter your confirm password",
-                  isPassword: true,
-                  obscureText: _obscureConfirmPassword,
-                  onVisibilityToggle: () {
-                    setState(() {
-                      _obscureConfirmPassword = !_obscureConfirmPassword;
-                    });
-                  },
-                ),
-                const SizedBox(height: 24),
-
-                // Terms and Agreement Radio/Checkbox
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          _agreedToTerms = !_agreedToTerms;
-                        });
-                      },
-                      child: Container(
-                        margin: const EdgeInsets.only(top: 2),
-                        width: 22,
-                        height: 22,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: _agreedToTerms ? const Color(0xFF25509E) : const Color(0xFFF5F6FA),
-                          border: Border.all(
-                            color: _agreedToTerms ? const Color(0xFF25509E) : Colors.grey.shade300,
-                          ),
-                        ),
-                        child: _agreedToTerms
-                            ? const Icon(Icons.check, size: 14, color: Colors.white)
-                            : null,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: RichText(
-                        text: TextSpan(
-                          style: const TextStyle(
-                            color: Color(0xFF757575), 
-                            fontSize: 14,
-                            fontFamily: 'Roboto', 
-                          ),
-                          children: [
-                            const TextSpan(text: "I've read and agreed to "),
-                            TextSpan(
-                              text: "User Agreement",
-                              style: const TextStyle(
-                                color: Color(0xFF0F3C5A),
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const TextSpan(text: " and "),
-                            TextSpan(
-                              text: "Privacy Policy",
-                              style: const TextStyle(
-                                color: Color(0xFF0F3C5A), 
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 32),
-
-                // --- NEXT BUTTON ---
-                SizedBox(
-                  width: double.infinity,
-                  height: 54,
-                  child: ElevatedButton(
-                    onPressed: _isLoading ? null : _signUpSeller, // Call the sign up function
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF25509E),
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                    ),
-                    child: _isLoading 
-                      ? const CircularProgressIndicator(color: Colors.white) 
-                      : const Text(
-                        "Next",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 30),
-
-                // "other way to sign in" divider
-                Center(
-                  child: Text(
-                    "other way to sign in",
-                    style: TextStyle(
-                      color: Colors.grey.shade500,
-                      fontSize: 14,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-
-                // Social Buttons
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _buildSocialButton(
-                      imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/5/53/Google_%22G%22_Logo.svg/512px-Google_%22G%22_Logo.svg.png",
-                      fallbackIcon: Icons.g_mobiledata,
-                      onTap: _isOAuthLoading ? null : _signInWithGoogle,
-                      showSpinner: _isOAuthLoading,
-                    ),
-                    const SizedBox(width: 20),
-                    _buildSocialButton(
-                      imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b8/2021_Facebook_icon.svg/2048px-2021_Facebook_icon.svg.png",
-                      fallbackIcon: Icons.facebook,
-                      isFacebook: true,
-                      onTap: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text("Facebook sign-in not wired yet.")),
-                        );
-                      },
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 40),
-
-                // Back to Sign In
-                Center(
-                  child: GestureDetector(
-                    onTap: () {
-                      Navigator.pop(context); 
-                    },
-                    child: RichText(
-                      text: TextSpan(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Image.asset(
+                        "assets/img/logo.png",
+                        height: 88,
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) {
+                          return const Text(
+                            "QUICKCART",
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 30,
+                              fontWeight: FontWeight.w900,
+                              color: Color(0xFF6A7185),
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 14),
+                      const Text(
+                        "Seller Account Setup",
+                        textAlign: TextAlign.center,
                         style: TextStyle(
-                          color: Colors.grey.shade500,
-                          fontSize: 14,
+                          fontSize: 24,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.black87,
                         ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        "Create your merchant account to manage products and orders",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 14, color: Colors.grey[700]),
+                      ),
+                      const SizedBox(height: 22),
+                      _buildLabel("Email Address"),
+                      const SizedBox(height: 8),
+                      _buildTextField(
+                        controller: _emailController,
+                        hint: "Enter your email address",
+                        inputType: TextInputType.emailAddress,
+                        prefixIcon: Icons.alternate_email_rounded,
+                      ),
+                      const SizedBox(height: 16),
+                      _buildLabel("Password"),
+                      const SizedBox(height: 8),
+                      _buildTextField(
+                        controller: _passwordController,
+                        hint: "Enter your password",
+                        isPassword: true,
+                        obscureText: _obscurePassword,
+                        prefixIcon: Icons.lock_outline,
+                        onVisibilityToggle: () {
+                          setState(() {
+                            _obscurePassword = !_obscurePassword;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      _buildLabel("Confirm Password"),
+                      const SizedBox(height: 8),
+                      _buildTextField(
+                        controller: _confirmPasswordController,
+                        hint: "Re-enter your password",
+                        isPassword: true,
+                        obscureText: _obscureConfirmPassword,
+                        prefixIcon: Icons.verified_user_outlined,
+                        onVisibilityToggle: () {
+                          setState(() {
+                            _obscureConfirmPassword = !_obscureConfirmPassword;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 18),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const TextSpan(text: "Already have an account? "),
-                          TextSpan(
-                            text: "Back to Sign In",
-                            style: const TextStyle(
-                              color: Color(0xFF0F3C5A),
-                              fontWeight: FontWeight.w700,
+                          GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _agreedToTerms = !_agreedToTerms;
+                              });
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.only(top: 2),
+                              width: 22,
+                              height: 22,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: _agreedToTerms
+                                    ? const Color(0xFF25509E)
+                                    : const Color(0xFFF5F6FA),
+                                border: Border.all(
+                                  color: _agreedToTerms
+                                      ? const Color(0xFF25509E)
+                                      : Colors.grey.shade300,
+                                ),
+                              ),
+                              child: _agreedToTerms
+                                  ? const Icon(
+                                      Icons.check,
+                                      size: 14,
+                                      color: Colors.white,
+                                    )
+                                  : null,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: RichText(
+                              text: const TextSpan(
+                                style: TextStyle(
+                                  color: Color(0xFF757575),
+                                  fontSize: 14,
+                                ),
+                                children: [
+                                  TextSpan(text: "I've read and agreed to "),
+                                  TextSpan(
+                                    text: "User Agreement",
+                                    style: TextStyle(
+                                      color: Color(0xFF0F3C5A),
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  TextSpan(text: " and "),
+                                  TextSpan(
+                                    text: "Privacy Policy",
+                                    style: TextStyle(
+                                      color: Color(0xFF0F3C5A),
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ],
                       ),
-                    ),
+                      const SizedBox(height: 24),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 54,
+                        child: ElevatedButton(
+                          onPressed: _isLoading ? null : _signUpSeller,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF25509E),
+                            elevation: 2,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          child: _isLoading
+                              ? const CircularProgressIndicator(
+                                  color: Colors.white,
+                                )
+                              : const Text(
+                                  "Next",
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                        ),
+                      ),
+                      const SizedBox(height: 22),
+                      Row(
+                        children: [
+                          Expanded(child: Divider(color: Colors.grey.shade300)),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            child: Text(
+                              "other way to sign in",
+                              style: TextStyle(
+                                color: Colors.grey.shade500,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                          Expanded(child: Divider(color: Colors.grey.shade300)),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _buildSocialButton(
+                            imageUrl:
+                                "https://upload.wikimedia.org/wikipedia/commons/thumb/5/53/Google_%22G%22_Logo.svg/512px-Google_%22G%22_Logo.svg.png",
+                            fallbackIcon: Icons.g_mobiledata,
+                            onTap: _isOAuthLoading ? null : _signInWithGoogle,
+                            showSpinner: _isOAuthLoading,
+                          ),
+                          const SizedBox(width: 20),
+                          _buildSocialButton(
+                            imageUrl:
+                                "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b8/2021_Facebook_icon.svg/2048px-2021_Facebook_icon.svg.png",
+                            fallbackIcon: Icons.facebook,
+                            isFacebook: true,
+                            onTap: () {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    "Facebook sign-in not wired yet.",
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+                      Center(
+                        child: GestureDetector(
+                          onTap: () {
+                            Navigator.pop(context);
+                          },
+                          child: RichText(
+                            text: TextSpan(
+                              style: TextStyle(
+                                color: Colors.grey.shade500,
+                                fontSize: 14,
+                              ),
+                              children: const [
+                                TextSpan(text: "Already have an account? "),
+                                TextSpan(
+                                  text: "Back to Sign In",
+                                  style: TextStyle(
+                                    color: Color(0xFF0F3C5A),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 20),
-              ],
+              ),
             ),
           ),
         ),
@@ -440,6 +506,7 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
   Widget _buildTextField({
     required String hint,
     required TextEditingController controller,
+    IconData? prefixIcon,
     bool isPassword = false,
     bool obscureText = false,
     TextInputType? inputType,
@@ -452,11 +519,14 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
       style: const TextStyle(fontSize: 15),
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle: TextStyle(
-          color: Colors.grey.shade400, 
-          fontSize: 15,
+        hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 15),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 16,
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        prefixIcon: prefixIcon != null
+            ? Icon(prefixIcon, color: Colors.grey.shade500)
+            : null,
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(color: Colors.grey.shade300),
@@ -468,7 +538,9 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
         suffixIcon: isPassword
             ? IconButton(
                 icon: Icon(
-                  obscureText ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                  obscureText
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
                   color: Colors.grey.shade500,
                 ),
                 onPressed: onVisibilityToggle,
@@ -494,6 +566,13 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
           shape: BoxShape.circle,
           border: Border.all(color: Colors.grey.shade300),
           color: Colors.white,
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x14000000),
+              blurRadius: 8,
+              offset: Offset(0, 3),
+            ),
+          ],
         ),
         child: Padding(
           padding: const EdgeInsets.all(12.0),
@@ -502,7 +581,7 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
               : Image.network(
                   imageUrl,
                   errorBuilder: (context, error, stackTrace) => Icon(
-                    fallbackIcon, 
+                    fallbackIcon,
                     color: isFacebook ? Colors.blue : Colors.grey,
                     size: 28,
                   ),

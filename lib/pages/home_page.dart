@@ -24,7 +24,46 @@ class _HomePageState extends State<HomePage> {
   ];
 
   // Define the default local asset path
-  static const String _defaultAssetPath = "assets/img/kasim.png";
+  static const String _defaultAssetPath = "assets/img/kasim.jpg";
+
+  static const List<Map<String, dynamic>> _fallbackProducts = [
+    {
+      'product_name': 'Fresh Tilapia',
+      'store_name': 'Fish Vendor - Lane A',
+      'price': 180,
+      'image_url': 'assets/img/tilapia.jpg',
+    },
+    {
+      'product_name': 'Pork Kasim',
+      'store_name': 'Meat Stall - Row B',
+      'price': 320,
+      'image_url': 'assets/img/kasim.jpg',
+    },
+    {
+      'product_name': 'Pork Liempo',
+      'store_name': 'Meat Stall - Row B',
+      'price': 360,
+      'image_url': 'assets/img/Liempo.png',
+    },
+    {
+      'product_name': 'Mixed Vegetables',
+      'store_name': 'Gulayan - Central Row',
+      'price': 75,
+      'image_url': 'assets/img/categories/vege.jpg',
+    },
+    {
+      'product_name': 'Seasonal Fruits',
+      'store_name': 'Fruit Stand - Gate 2',
+      'price': 95,
+      'image_url': 'assets/img/categories/fruits.jpg',
+    },
+    {
+      'product_name': 'Fresh Bangus',
+      'store_name': 'Fish Vendor - Lane A',
+      'price': 210,
+      'image_url': 'assets/img/categories/fishesh.jpg',
+    },
+  ];
 
   @override
   void initState() {
@@ -103,7 +142,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   List<dynamic> _productsForFilter() {
-    if (_selectedFilter == 'All') return products;
+    final List<Map<String, dynamic>> normalized = _normalizedProducts();
+
+    if (_selectedFilter == 'All') return normalized;
 
     final keywords = <String>{};
     switch (_selectedFilter) {
@@ -121,13 +162,57 @@ class _HomePageState extends State<HomePage> {
         break;
     }
 
-    final filtered = products.where((p) {
+    final filtered = normalized.where((p) {
       final name = (p['product_name'] ?? '').toString().toLowerCase();
       return keywords.any(name.contains);
     }).toList();
 
     // Fallback keeps UI populated if product names do not contain category terms.
-    return filtered.isEmpty ? products : filtered;
+    return filtered.isEmpty ? normalized : filtered;
+  }
+
+  List<Map<String, dynamic>> _normalizedProducts() {
+    final source = products.isEmpty ? _fallbackProducts : products;
+
+    return List<Map<String, dynamic>>.generate(source.length, (index) {
+      final item = Map<String, dynamic>.from(source[index] as Map);
+      final fallback = _fallbackProducts[index % _fallbackProducts.length];
+
+      String ensureText(String key) {
+        final value = item[key]?.toString().trim();
+        if (value == null || value.isEmpty) {
+          return fallback[key].toString();
+        }
+        return value;
+      }
+
+      dynamic ensurePrice() {
+        final value = item['price'];
+        if (value == null || value.toString().trim().isEmpty) {
+          return fallback['price'];
+        }
+        return value;
+      }
+
+      return {
+        'product_name': ensureText('product_name'),
+        'store_name': ensureText('store_name'),
+        'price': ensurePrice(),
+        'image_url': ensureText('image_url'),
+      };
+    });
+  }
+
+  String _productName(dynamic product, [String fallback = 'Fresh Item']) {
+    final value = product['product_name']?.toString().trim();
+    if (value == null || value.isEmpty) return fallback;
+    return value;
+  }
+
+  String _storeName(dynamic product, [String fallback = 'San Fernando Stall']) {
+    final value = product['store_name']?.toString().trim();
+    if (value == null || value.isEmpty) return fallback;
+    return value;
   }
 
   void _openCart() {
@@ -141,6 +226,60 @@ class _HomePageState extends State<HomePage> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text('$productName added to cart')));
+  }
+
+  Future<void> _addToCart(dynamic product) async {
+    final client = Supabase.instance.client;
+    final user = client.auth.currentUser;
+
+    if (user == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please login first.')));
+      return;
+    }
+
+    final productName = _productName(product, 'Fresh Item');
+    final price = product['price'];
+
+    try {
+      final existing = await client
+          .from('cart')
+          .select('id, qty')
+          .eq('buyer_id', user.id)
+          .eq('product_name', productName)
+          .maybeSingle();
+
+      if (existing != null) {
+        final currentQty = int.tryParse(existing['qty'].toString()) ?? 1;
+        await client
+            .from('cart')
+            .update({'qty': currentQty + 1})
+            .eq('id', existing['id'])
+            .eq('buyer_id', user.id);
+      } else {
+        await client.from('cart').insert({
+          'product_name': productName,
+          'price': price,
+          'qty': 1,
+          'buyer_id': user.id,
+        });
+      }
+
+      if (!mounted) return;
+      _showAddMessage(productName);
+    } on PostgrestException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Database error: ${e.message}')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to add item: $e')));
+    }
   }
 
   Widget _buildTopHeader() {
@@ -244,7 +383,7 @@ class _HomePageState extends State<HomePage> {
               Expanded(
                 child: _buildInfoPill(
                   label: 'PICK UP',
-                  value: 'Juliana CSFP',
+                  value: 'San Fernando Market Plaza',
                   icon: Icons.location_on_outlined,
                 ),
               ),
@@ -252,7 +391,7 @@ class _HomePageState extends State<HomePage> {
               Expanded(
                 child: _buildInfoPill(
                   label: 'WITHIN',
-                  value: '1 Hour',
+                  value: 'Today 5AM-7PM',
                   icon: Icons.schedule_outlined,
                 ),
               ),
@@ -267,16 +406,22 @@ class _HomePageState extends State<HomePage> {
             ),
             child: Row(
               children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.25),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(
-                    Icons.local_offer_outlined,
-                    color: Colors.white,
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Image.asset(
+                      'assets/img/categories/vege.jpg',
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => Container(
+                        color: Colors.white.withValues(alpha: 0.25),
+                        child: const Icon(
+                          Icons.local_offer_outlined,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -285,16 +430,16 @@ class _HomePageState extends State<HomePage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Get 50% OFF',
+                        'San Fernando Market Plaza',
                         style: TextStyle(
                           color: Colors.white,
-                          fontSize: 22,
+                          fontSize: 16,
                           fontWeight: FontWeight.w900,
                         ),
                       ),
                       SizedBox(height: 2),
                       Text(
-                        'On your first 3 orders',
+                        'Fresh goods from local public market stalls',
                         style: TextStyle(color: Colors.white, fontSize: 12),
                       ),
                     ],
@@ -475,7 +620,7 @@ class _HomePageState extends State<HomePage> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(
-                  product['product_name'] ?? 'Flash Product',
+                  _productName(product, 'Market Product'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -574,7 +719,7 @@ class _HomePageState extends State<HomePage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      p['product_name'] ?? 'Item',
+                      _productName(p, 'Fresh Item'),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -641,7 +786,10 @@ class _HomePageState extends State<HomePage> {
               const SizedBox(height: 14),
               _buildCategoryFilters(),
               const SizedBox(height: 20),
-              _buildSectionHeader('Flash Deals', 'Limited-time picks for you'),
+              _buildSectionHeader(
+                'Flash Deals',
+                'Limited picks from San Fernando market stalls',
+              ),
               const SizedBox(height: 12),
               SizedBox(
                 height: 100,
@@ -658,7 +806,10 @@ class _HomePageState extends State<HomePage> {
                       ),
               ),
               const SizedBox(height: 20),
-              _buildSectionHeader('Recommended', 'Curated for your basket'),
+              _buildSectionHeader(
+                'Recommended',
+                'Popular items in the public market today',
+              ),
               const SizedBox(height: 12),
               SizedBox(
                 height: 230,
@@ -684,14 +835,12 @@ class _HomePageState extends State<HomePage> {
                               : "₱0";
 
                           return ProductCard(
-                            title: p['product_name'] ?? "Fresh Item",
-                            storeName: p['store_name'] ?? 'Shop/Store',
+                            title: _productName(p, 'Fresh Item'),
+                            storeName: _storeName(p, 'San Fernando Stall'),
                             price: priceText,
                             imageUrl: resolvedImage,
                             onAddPressed: () {
-                              _showAddMessage(
-                                (p['product_name'] ?? 'Item').toString(),
-                              );
+                              _addToCart(p);
                             },
                           );
                         },
@@ -700,7 +849,7 @@ class _HomePageState extends State<HomePage> {
               const SizedBox(height: 18),
               _buildSectionHeader(
                 'Daily Essentials',
-                'Quick restock suggestions',
+                'Everyday staples from trusted plaza vendors',
               ),
               const SizedBox(height: 12),
               _buildEssentialsGrid(filteredProducts),
@@ -752,7 +901,7 @@ class ProductCard extends StatelessWidget {
             width: double.infinity,
             fit: BoxFit.cover,
             errorBuilder: (context, error, stackTrace) => Image.asset(
-              "assets/img/kasim.png",
+              "assets/img/kasim.jpg",
               height: 112,
               width: double.infinity,
               fit: BoxFit.cover,

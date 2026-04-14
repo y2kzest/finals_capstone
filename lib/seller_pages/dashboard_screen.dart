@@ -135,174 +135,263 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
     // In a real app, this would navigate to the login screen
     if (mounted) {
       // For testing, we just pop the current route
-      Navigator.of(context).pop(); 
+      Navigator.of(context).pop();
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: const Color(0xFFF5F6FB),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: kPrimaryBlue))
-          : Column(
-              children: <Widget>[
-                // --- Top Blue Section ---
-                Container(
-                  padding: const EdgeInsets.fromLTRB(20, 50, 20, 20),
-                  decoration: const BoxDecoration(
-                    color: kPrimaryBlue,
-                    borderRadius: BorderRadius.only(
-                      bottomLeft: Radius.circular(30),
-                      bottomRight: Radius.circular(30),
+          : SafeArea(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
+                children: <Widget>[
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(20),
+                      gradient: const LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [kPrimaryBlue, Color(0xFF2A4BA0)],
+                      ),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x22000000),
+                          blurRadius: 18,
+                          offset: Offset(0, 8),
+                        ),
+                      ],
                     ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black26,
-                        blurRadius: 10,
-                        offset: Offset(0, 5),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: <Widget>[
+                            Text(
+                              'Hey, $_userName',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 28,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            IconButton(
+                              style: IconButton.styleFrom(
+                                backgroundColor: Colors.white24,
+                                foregroundColor: Colors.white,
+                              ),
+                              icon: const Icon(Icons.logout),
+                              onPressed: _logout,
+                              tooltip: 'Logout',
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Container(
+                          height: 50,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: const TextField(
+                            decoration: InputDecoration(
+                              prefixIcon: Icon(
+                                Icons.search,
+                                color: Colors.white70,
+                              ),
+                              hintText: 'Search products, orders, inventory',
+                              hintStyle: TextStyle(color: Colors.white70),
+                              border: InputBorder.none,
+                              contentPadding: EdgeInsets.symmetric(
+                                vertical: 15,
+                              ),
+                            ),
+                            style: TextStyle(color: Colors.white),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'YOUR SHOP',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                            letterSpacing: 1,
+                          ),
+                        ),
+                        Row(
+                          children: <Widget>[
+                            Expanded(
+                              child: Text(
+                                _storeName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 19,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            const Icon(
+                              Icons.keyboard_arrow_down,
+                              color: Colors.white,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DashboardMiniStat(
+                          label: 'New Orders',
+                          value: '$_newOrderCount',
+                          icon: Icons.receipt_long_outlined,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: DashboardMiniStat(
+                          label: 'Products',
+                          value: '128',
+                          icon: Icons.inventory_2_outlined,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: DashboardMiniStat(
+                          label: 'Sales Today',
+                          value: '₱8.2K',
+                          icon: Icons.trending_up_rounded,
+                        ),
                       ),
                     ],
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      // Greeting and Logout Button (Replaces Cart Icon)
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: <Widget>[
-                          Text(
-                            // Dynamic greeting
-                            'Hey, $_userName',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 28,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          // Logout button
-                          IconButton(
-                            icon: const Icon(
-                              Icons.logout,
-                              color: Colors.white,
-                              size: 30,
-                            ),
-                            onPressed: _logout,
-                            tooltip: 'Logout',
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 25),
-
-                      // Search Bar
-                      Container(
-                        height: 50,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(15),
-                        ),
-                        child: const TextField(
-                          decoration: InputDecoration(
-                            prefixIcon: Icon(Icons.search, color: Colors.white70),
-                            hintText: 'Search Products or store',
-                            hintStyle: TextStyle(color: Colors.white70),
-                            border: InputBorder.none,
-                            contentPadding: EdgeInsets.symmetric(vertical: 15),
-                          ),
-                          style: TextStyle(color: Colors.white),
-                        ),
-                      ),
-                      const SizedBox(height: 25),
-
-                      const Text(
-                        'YOUR SHOP',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 12,
-                          letterSpacing: 1,
-                        ),
-                      ),
-                      Row(
-                        children: <Widget>[
-                          Text(
-                            // Dynamic Store Name
-                            _storeName,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const Icon(Icons.keyboard_arrow_down, color: Colors.white),
-                        ],
-                      ),
-                    ],
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Quick Actions',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.black87,
+                    ),
                   ),
-                ),
-
-                // --- Bottom Section with Clickable Cards ---
-                Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.all(20.0),
-                    children: <Widget>[
-                      DashboardCard(
-                        icon: Icons.person_outline,
-                        title: 'Orders',
-                        // Dynamic subtitle
-                        subtitle: '$_newOrderCount new orders',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const OrdersPage(),
-                            ),
-                          );
-                        },
-                      ),
-                      DashboardCard(
-                        icon: Icons.article_outlined,
-                        title: 'Analytics',
-                        subtitle: '34 new sales done',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const AnalyticsReportScreen(),
-                            ),
-                          );
-                        },
-                      ),
-                      DashboardCard(
-                        icon: Icons.inventory_2_outlined,
-                        title: 'Inventory',
-                        subtitle: 'Your Products',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const InventoryManagementScreen(),
-                            ),
-                          );
-                        },
-                      ),
-                      DashboardCard(
-                        icon: Icons.add_box_outlined, // Changed icon to a better 'add' indicator
-                        title: 'Upload Products',
-                        subtitle: 'Click here to add a new item',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const AddProductPage(),
-                            ),
-                          );
-                        },
-                      ),
-                    ],
+                  const SizedBox(height: 10),
+                  DashboardCard(
+                    icon: Icons.person_outline,
+                    title: 'Orders',
+                    subtitle: '$_newOrderCount new orders waiting for action',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const OrdersPage()),
+                      );
+                    },
                   ),
-                ),
-              ],
+                  DashboardCard(
+                    icon: Icons.article_outlined,
+                    title: 'Analytics',
+                    subtitle: 'Track revenue, traffic, and conversion trends',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const AnalyticsReportScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  DashboardCard(
+                    icon: Icons.inventory_2_outlined,
+                    title: 'Inventory',
+                    subtitle: 'Manage stock levels and product availability',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const InventoryManagementScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  DashboardCard(
+                    icon: Icons.add_box_outlined,
+                    title: 'Upload Products',
+                    subtitle: 'Add a new product and publish in seconds',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const AddProductPage(),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
             ),
+    );
+  }
+}
+
+class DashboardMiniStat extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+
+  const DashboardMiniStat({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: kPrimaryBlue, size: 18),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: Colors.black87,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -329,10 +418,8 @@ class DashboardCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(15),
       child: Card(
         margin: const EdgeInsets.only(bottom: 15.0),
-        elevation: 3, // Slightly increased elevation for better shadow
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(15),
-        ),
+        elevation: 1,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 15.0),
           child: Row(
@@ -340,10 +427,16 @@ class DashboardCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: kPrimaryBlue.withValues(alpha: 0.1), // Used primary color for accent
+                  color: kPrimaryBlue.withValues(
+                    alpha: 0.1,
+                  ), // Used primary color for accent
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(icon, size: 30, color: kPrimaryBlue), // Used primary color for icon
+                child: Icon(
+                  icon,
+                  size: 30,
+                  color: kPrimaryBlue,
+                ), // Used primary color for icon
               ),
               const SizedBox(width: 15),
               Expanded(
@@ -360,10 +453,7 @@ class DashboardCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       subtitle,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey[600],
-                      ),
+                      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                     ),
                   ],
                 ),
