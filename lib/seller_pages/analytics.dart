@@ -1,25 +1,5 @@
 import 'package:flutter/material.dart';
-
-// You can run this main function for a minimal example
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Analytics Report',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
-      ),
-      home: const AnalyticsReportScreen(),
-    );
-  }
-}
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AnalyticsReportScreen extends StatefulWidget {
   const AnalyticsReportScreen({super.key});
@@ -29,19 +9,83 @@ class AnalyticsReportScreen extends StatefulWidget {
 }
 
 class _AnalyticsReportScreenState extends State<AnalyticsReportScreen> {
-  // State variables for the Timeframe selector
-  String selectedTimeframe = 'All-time'; // Display text for the main selector
+  String selectedTimeframe = 'All-time';
   bool isTimeframeMenuOpen = false;
-  String selectedQuickPeriod = 'This Month'; // Highlighted item in the dropdown
+  String selectedQuickPeriod = 'This Month';
+  final List<String> quickPeriods = ['Last 7 Days', 'This Month', 'This Year', 'All-time'];
 
-  final List<String> quickPeriods = ['Last 7 Days', 'This Month', 'This Year', 'Custom'];
-  
-  // Dummy data for the table
-  final List<Map<String, String>> productSales = const [
-    {'Product': 'Tilapia', 'Sold': '45Kg', 'Revenue': '₱8,100', 'StockLeft': '26Kg'},
-    {'Product': 'Pork Belly', 'Sold': '32Kg', 'Revenue': '₱7,800', 'StockLeft': '21Kg'},
-    {'Product': 'Beef', 'Sold': '15Kg', 'Revenue': '₱4,212', 'StockLeft': '13Kg'},
-  ];
+  bool _isLoading = true;
+  double _totalRevenue = 0;
+  int _totalOrders = 0;
+  double _avgOrder = 0;
+  String _topSelling = '—';
+  List<Map<String, dynamic>> _productSalesData = [];
+
+  final supabase = Supabase.instance.client;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAnalytics();
+  }
+
+  Future<void> _loadAnalytics() async {
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) {
+      setState(() => _isLoading = false);
+      return;
+    }
+    try {
+      final orders = List<Map<String, dynamic>>.from(
+        await supabase.from('orders').select().eq('seller_id', userId),
+      );
+      double revenue = 0;
+      final productCount = <String, int>{};
+      for (final o in orders) {
+        final price = (o['price'] as num?)?.toDouble() ?? 0;
+        final qty = (o['qty'] as num?)?.toInt() ?? 1;
+        revenue += price * qty;
+        final pName = o['product_name']?.toString() ?? '';
+        if (pName.isNotEmpty) productCount[pName] = (productCount[pName] ?? 0) + qty;
+      }
+      String topSelling = '—';
+      if (productCount.isNotEmpty) {
+        topSelling = productCount.entries.reduce((a, b) => a.value > b.value ? a : b).key;
+      }
+      final products = List<Map<String, dynamic>>.from(
+        await supabase.from('product').select('name, stock_quantity').eq('user_id', userId),
+      );
+      final salesData = <Map<String, dynamic>>[];
+      for (final p in products) {
+        final pName = p['name']?.toString() ?? '';
+        final sold = productCount[pName] ?? 0;
+        double pRevenue = 0;
+        for (final o in orders) {
+          if (o['product_name'] == pName) {
+            pRevenue += ((o['price'] as num?)?.toDouble() ?? 0) *
+                ((o['qty'] as num?)?.toInt() ?? 1);
+          }
+        }
+        salesData.add({
+          'Product': pName,
+          'Sold': '$sold',
+          'Revenue': '₱${pRevenue.toStringAsFixed(0)}',
+          'StockLeft': p['stock_quantity']?.toString() ?? '—',
+        });
+      }
+      setState(() {
+        _totalRevenue = revenue;
+        _totalOrders = orders.length;
+        _avgOrder = orders.isNotEmpty ? revenue / orders.length : 0;
+        _topSelling = topSelling;
+        _productSalesData = salesData;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('Analytics error: $e');
+      setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -61,14 +105,19 @@ class _AnalyticsReportScreenState extends State<AnalyticsReportScreen> {
                   child: Row(
                     children: [
                       // Back Button
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.grey[200],
+                      GestureDetector(
+                        onTap: () {
+                          if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+                        },
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.grey[200],
+                          ),
+                          child: const Icon(Icons.arrow_back_ios_new, size: 20, color: Colors.black87),
                         ),
-                        child: const Icon(Icons.arrow_back_ios_new, size: 20, color: Colors.black87),
                       ),
                       const SizedBox(width: 10),
                       // Title
@@ -108,20 +157,28 @@ class _AnalyticsReportScreenState extends State<AnalyticsReportScreen> {
                 const SizedBox(height: 20),
 
                 // --- Metric Cards ---
-                GridView.count(
-                  crossAxisCount: 2,
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(), // To allow main scroll view to handle scrolling
-                  crossAxisSpacing: 15,
-                  mainAxisSpacing: 15,
-                  childAspectRatio: 1.2, // Adjust aspect ratio for card size
-                  children: const <Widget>[
-                    MetricCard(title: 'Top Sales', value: '₱00.00'),
-                    MetricCard(title: 'Total Orders', value: '000'),
-                    MetricCard(title: 'Average Order', value: '000'),
-                    MetricCard(title: 'Top Selling', value: 'Pork'),
-                  ],
-                ),
+                if (_isLoading)
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(vertical: 40),
+                      child: CircularProgressIndicator(),
+                    ),
+                  )
+                else
+                  GridView.count(
+                    crossAxisCount: 2,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    crossAxisSpacing: 15,
+                    mainAxisSpacing: 15,
+                    childAspectRatio: 1.2,
+                    children: [
+                      MetricCard(title: 'Top Sales', value: '₱${_totalRevenue.toStringAsFixed(0)}'),
+                      MetricCard(title: 'Total Orders', value: '$_totalOrders'),
+                      MetricCard(title: 'Avg Order', value: '₱${_avgOrder.toStringAsFixed(0)}'),
+                      MetricCard(title: 'Top Selling', value: _topSelling),
+                    ],
+                  ),
                 const SizedBox(height: 30),
 
                 // --- Product Sales Table Header ---
@@ -142,7 +199,8 @@ class _AnalyticsReportScreenState extends State<AnalyticsReportScreen> {
                 const SizedBox(height: 10),
 
                 // --- Product Sales List ---
-                ...productSales.map((sale) => ProductSaleRow(sale: sale)),
+                if (!_isLoading && _productSalesData.isNotEmpty)
+                  ..._productSalesData.map((sale) => ProductSaleRow(sale: sale)),
 
                 const SizedBox(height: 50),
               ],
@@ -207,7 +265,7 @@ class MetricCard extends StatelessWidget {
 
 // --- Product Sale Row Widget (Custom Table) ---
 class ProductSaleRow extends StatelessWidget {
-  final Map<String, String> sale;
+  final Map<String, dynamic> sale;
 
   const ProductSaleRow({super.key, required this.sale});
 
@@ -218,10 +276,10 @@ class ProductSaleRow extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: <Widget>[
-          SizedBox(width: 80, child: Text(sale['Product']!, style: const TextStyle(fontWeight: FontWeight.w600))),
-          SizedBox(width: 60, child: Text(sale['Sold']!)),
-          SizedBox(width: 80, child: Text(sale['Revenue']!)),
-          Text(sale['StockLeft']!),
+          SizedBox(width: 80, child: Text(sale['Product']?.toString() ?? '', style: const TextStyle(fontWeight: FontWeight.w600))),
+          SizedBox(width: 60, child: Text(sale['Sold']?.toString() ?? '')),
+          SizedBox(width: 80, child: Text(sale['Revenue']?.toString() ?? '')),
+          Text(sale['StockLeft']?.toString() ?? ''),
         ],
       ),
     );

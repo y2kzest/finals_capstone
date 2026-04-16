@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'dashboard_screen.dart'; // Import the final destination
+import '../bahay.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/seller_approval_notifications.dart';
 
 // Defined constants for consistent design
 const Color kPrimaryBlue = Color(0xFF3455EB);
@@ -28,6 +29,19 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
   final TextEditingController _contactEmailController = TextEditingController(
     text: 'official@ultimatebazaar.com',
   );
+
+  @override
+  void initState() {
+    super.initState();
+    final userEmail = Supabase.instance.client.auth.currentUser?.email;
+    if (userEmail != null && userEmail.isNotEmpty) {
+      _contactEmailController.text = userEmail;
+    }
+  }
+
+  bool _isValidEmail(String email) {
+    return RegExp(r'^[\w.-]+@[\w.-]+\.\w{2,}$').hasMatch(email);
+  }
 
   @override
   void dispose() {
@@ -66,11 +80,15 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
       return;
     }
 
+    final contactEmail = _contactEmailController.text.trim();
+
     if (_storeInfoController.text.isEmpty ||
-        _storeAddressController.text.isEmpty) {
+        _storeAddressController.text.isEmpty ||
+        contactEmail.isEmpty ||
+        !_isValidEmail(contactEmail)) {
       _showActionSnackbar(
         context,
-        "Please fill in all required fields (*).",
+        "Please fill in all required fields and enter a valid contact email.",
         isError: true,
       );
       return;
@@ -83,15 +101,31 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
     );
 
     try {
+      // Fetch the user's name to satisfy not-null columns if row is new
+      String? fullName;
+      try {
+        final profile = await supabase
+            .from('profile')
+            .select('name')
+            .eq('user_id', userId)
+            .maybeSingle();
+        fullName = profile?['name']?.toString();
+      } catch (_) {}
+      fullName ??= supabase.auth.currentUser?.email?.split('@')[0] ?? 'Seller';
+
       // Collect the remaining profile data
       final finalProfileData = {
         'user_id': userId, // Key for upsert matching
+        'full_name': fullName,
+        'store_name': _storeInfoController.text,
         'store_information_final': _storeInfoController.text,
         'stall_number': _stallNumberController.text,
         'store_address': _storeAddressController.text,
-        'official_contact_email': _contactEmailController.text,
+        'official_contact_email': contactEmail,
         'is_profile_finalized':
             true, // Mark the entire profile creation as complete
+        'approval_status': 'pending',
+        'approval_email_sent_at': null,
       };
 
       // Update the existing seller profile record with the final details
@@ -100,17 +134,91 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
           .from('seller_profiles')
           .upsert(finalProfileData, onConflict: 'user_id');
 
+      // Best effort bridge: mirror pending seller data to common vendor tables
+      // used by an existing external admin web panel.
+      try {
+        final syncResult = await SellerApprovalNotifications()
+            .syncExternalAdmin(
+              userId: userId,
+              storeName: _storeInfoController.text.trim(),
+              stallNo: _stallNumberController.text.trim(),
+              businessType: 'Retail Store',
+              contactEmail: contactEmail,
+            );
+        debugPrint('syncExternalAdmin result: $syncResult');
+
+        final syncedTables = (syncResult['syncedTables'] as List?)
+            ?.map((e) => e.toString())
+            .toList(growable: false);
+        final ok = syncResult['ok'] == true;
+
+        if (!ok && context.mounted) {
+          _showActionSnackbar(
+            context,
+            'Admin sync warning: no matching vendor table mapping found yet.',
+            isError: true,
+          );
+        } else if (syncedTables != null &&
+            syncedTables.isNotEmpty &&
+            context.mounted) {
+          _showActionSnackbar(
+            context,
+            'Synced to admin table(s): ${syncedTables.join(', ')}',
+          );
+        }
+      } catch (_) {
+        // Do not block seller flow if external admin table mapping is not present.
+        debugPrint('syncExternalAdmin threw an exception.');
+      }
+
+      // Best effort: trigger a submission-received email via Edge Function.
+      // Approval emails are triggered later by server-side approval checks.
+      try {
+        final emailResult = await SellerApprovalNotifications()
+            .sendSubmissionReceivedEmail(
+              email: contactEmail,
+              storeName: _storeInfoController.text.trim(),
+            );
+        debugPrint('sendSubmissionReceivedEmail result: $emailResult');
+
+        final emailOk = emailResult['ok'] == true;
+        if (context.mounted && !emailOk) {
+          _showActionSnackbar(
+            context,
+            emailResult['message']?.toString() ??
+                'Email notification was not sent. Please verify email service setup.',
+            isError: true,
+          );
+        } else if (context.mounted) {
+          _showActionSnackbar(
+            context,
+            'Submission email sent to $contactEmail',
+          );
+        }
+      } catch (e) {
+        // Keep seller flow successful even if notification infra is unavailable.
+        debugPrint('sendSubmissionReceivedEmail threw: $e');
+        if (context.mounted) {
+          _showActionSnackbar(
+            context,
+            'Email function error: $e',
+            isError: true,
+          );
+        }
+      }
+
       if (!context.mounted) return;
       _showActionSnackbar(
         context,
-        "Profile submitted successfully!",
+        "Application submitted. Status: Pending review. Approval notice is currently shown in-app.",
         isError: false,
       );
 
-      // Navigate to the final Seller Dashboard (SellerHomePage) and clear navigation history
-      Navigator.pushReplacement(
+      // Navigate to the buyer app — seller dashboard is accessed from Profile once approved
+      Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (context) => const ShopDashboardScreen()),
+        MaterialPageRoute(builder: (context) => const Bahay()),
+        (route) => false,
       );
     } on PostgrestException catch (e) {
       if (!context.mounted) return;

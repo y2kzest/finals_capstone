@@ -1,28 +1,15 @@
-import 'package:caps_finals/profile.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+
+import 'profile.dart';
 import 'pages/home_page.dart';
 import 'pages/category_page.dart';
-//  NEW: Import the Profile Page
-
-void main() {
-  runApp(const Bahay());
-}
 
 class Bahay extends StatelessWidget {
   const Bahay({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Shop UI',
-      theme: ThemeData(
-        textTheme: GoogleFonts.poppinsTextTheme(),
-        scaffoldBackgroundColor: Colors.grey[100],
-      ),
-      home: const MainNavigation(),
-    );
+    return const MainNavigation();
   }
 }
 
@@ -66,14 +53,58 @@ class _MainNavigationState extends State<MainNavigation> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 260),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
-        child: KeyedSubtree(
-          key: ValueKey(_selectedIndex),
-          child: _pages[_selectedIndex],
-        ),
+      extendBody: true,
+      body: Stack(
+        children: [
+          IgnorePointer(
+            child: Stack(
+              children: [
+                Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0xFFEAF1FF), Color(0xFFF7FAFF)],
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: -120,
+                  right: -70,
+                  child: Container(
+                    width: 260,
+                    height: 260,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: const Color(0xFF1A4DBE).withValues(alpha: 0.10),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 260,
+                  left: -90,
+                  child: Container(
+                    width: 220,
+                    height: 220,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: const Color(0xFFF5A524).withValues(alpha: 0.10),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 260),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            child: KeyedSubtree(
+              key: ValueKey(_selectedIndex),
+              child: _pages[_selectedIndex],
+            ),
+          ),
+        ],
       ),
       bottomNavigationBar: SafeArea(
         minimum: const EdgeInsets.fromLTRB(12, 0, 12, 10),
@@ -82,11 +113,12 @@ class _MainNavigationState extends State<MainNavigation> {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: const Color(0xFFE7ECF7)),
             boxShadow: const [
               BoxShadow(
-                color: Color(0x20000000),
-                blurRadius: 18,
-                offset: Offset(0, 8),
+                color: Color(0x22000000),
+                blurRadius: 22,
+                offset: Offset(0, 10),
               ),
             ],
           ),

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../utils/helpers.dart';
 import 'cart_page.dart';
+import 'productdet.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -14,6 +16,10 @@ class _HomePageState extends State<HomePage> {
   bool isLoading = true;
   String _selectedFilter = 'All';
   String _greetingName = 'Shopper';
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
+  List<Map<String, dynamic>> _notifications = [];
+  List<Map<String, dynamic>> _banners = [];
 
   final List<String> _filters = const [
     'All',
@@ -21,48 +27,7 @@ class _HomePageState extends State<HomePage> {
     'Meat',
     'Vegetables',
     'Fruits',
-  ];
-
-  // Define the default local asset path
-  static const String _defaultAssetPath = "assets/img/kasim.jpg";
-
-  static const List<Map<String, dynamic>> _fallbackProducts = [
-    {
-      'product_name': 'Fresh Tilapia',
-      'store_name': 'Fish Vendor - Lane A',
-      'price': 180,
-      'image_url': 'assets/img/tilapia.jpg',
-    },
-    {
-      'product_name': 'Pork Kasim',
-      'store_name': 'Meat Stall - Row B',
-      'price': 320,
-      'image_url': 'assets/img/kasim.jpg',
-    },
-    {
-      'product_name': 'Pork Liempo',
-      'store_name': 'Meat Stall - Row B',
-      'price': 360,
-      'image_url': 'assets/img/Liempo.png',
-    },
-    {
-      'product_name': 'Mixed Vegetables',
-      'store_name': 'Gulayan - Central Row',
-      'price': 75,
-      'image_url': 'assets/img/categories/vege.jpg',
-    },
-    {
-      'product_name': 'Seasonal Fruits',
-      'store_name': 'Fruit Stand - Gate 2',
-      'price': 95,
-      'image_url': 'assets/img/categories/fruits.jpg',
-    },
-    {
-      'product_name': 'Fresh Bangus',
-      'store_name': 'Fish Vendor - Lane A',
-      'price': 210,
-      'image_url': 'assets/img/categories/fishesh.jpg',
-    },
+    'Apparel',
   ];
 
   @override
@@ -70,6 +35,207 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _loadGreetingName();
     fetchProducts();
+    _fetchNotifications();
+    _fetchBanners();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _fetchNotifications() async {
+    final client = Supabase.instance.client;
+    final user = client.auth.currentUser;
+    if (user == null) return;
+    try {
+      final resp = await client
+          .from('notifications')
+          .select()
+          .eq('user_id', user.id)
+          .order('created_at', ascending: false)
+          .limit(20);
+      if (mounted) {
+        setState(() => _notifications = List<Map<String, dynamic>>.from(resp));
+      }
+    } catch (_) {
+      // notifications table may not exist yet
+    }
+  }
+
+  Future<void> _fetchBanners() async {
+    try {
+      final resp = await Supabase.instance.client
+          .from('seller_profiles')
+          .select('store_name, banner_url, logo_url, category, opening_time, closing_time, is_open')
+          .not('banner_url', 'is', null)
+          .eq('approval_status', 'approved')
+          .limit(10);
+      if (mounted) {
+        setState(() => _banners = List<Map<String, dynamic>>.from(resp));
+      }
+    } catch (_) {
+      // banner_url column may not exist yet
+    }
+  }
+
+  void _showNotificationsSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        maxChildSize: 0.85,
+        minChildSize: 0.3,
+        builder: (context, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              const SizedBox(height: 8),
+              Container(width: 40, height: 4,
+                  decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Row(
+                  children: [
+                    const Text('Notifications',
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                    const Spacer(),
+                    if (_notifications.any((n) => n['is_read'] != true))
+                      TextButton(
+                        onPressed: () async {
+                          final client = Supabase.instance.client;
+                          final user = client.auth.currentUser;
+                          if (user == null) return;
+                          try {
+                            await client.from('notifications')
+                                .update({'is_read': true})
+                                .eq('user_id', user.id);
+                            _fetchNotifications();
+                          } catch (_) {}
+                        },
+                        child: const Text('Mark all read',
+                            style: TextStyle(color: Color(0xFF1A4DBE), fontWeight: FontWeight.w600, fontSize: 13)),
+                      ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: _notifications.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.notifications_off_outlined, size: 48, color: Colors.grey[300]),
+                            const SizedBox(height: 12),
+                            Text('No notifications yet', style: TextStyle(color: Colors.grey[500], fontSize: 15)),
+                          ],
+                        ),
+                      )
+                    : ListView.builder(
+                        controller: scrollController,
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        itemCount: _notifications.length,
+                        itemBuilder: (context, i) {
+                          final n = _notifications[i];
+                          final isRead = n['is_read'] == true;
+                          final type = n['type']?.toString() ?? '';
+                          final message = n['message']?.toString() ?? 'Notification';
+                          final title = n['title']?.toString() ?? _notifTitle(type);
+                          String dateStr = '';
+                          try {
+                            final dt = DateTime.parse(n['created_at'].toString()).toLocal();
+                            final h = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
+                            final amPm = dt.hour >= 12 ? 'PM' : 'AM';
+                            dateStr = '${dt.month}/${dt.day} $h:${dt.minute.toString().padLeft(2, '0')} $amPm';
+                          } catch (_) {}
+
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: isRead ? Colors.white : const Color(0xFFF0F4FF),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: isRead ? const Color(0xFFF3F4F6) : const Color(0xFFD4DEFF)),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  width: 38, height: 38,
+                                  decoration: BoxDecoration(
+                                    color: _notifColor(type).withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Icon(_notifIcon(type), color: _notifColor(type), size: 20),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(title,
+                                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14,
+                                              color: isRead ? const Color(0xFF6B7280) : const Color(0xFF111827))),
+                                      const SizedBox(height: 4),
+                                      Text(message, style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280),
+                                          height: 1.3)),
+                                      if (dateStr.isNotEmpty) ...[
+                                        const SizedBox(height: 6),
+                                        Text(dateStr, style: TextStyle(fontSize: 11, color: Colors.grey[400])),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                                if (!isRead)
+                                  Container(width: 8, height: 8, margin: const EdgeInsets.only(top: 6),
+                                      decoration: const BoxDecoration(color: Color(0xFF1A4DBE), shape: BoxShape.circle)),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _notifTitle(String type) {
+    switch (type) {
+      case 'seller_approved': return 'Seller Approved';
+      case 'seller_rejected': return 'Application Denied';
+      case 'order_placed': return 'New Order';
+      case 'order_ready': return 'Order Ready';
+      default: return 'Notification';
+    }
+  }
+
+  IconData _notifIcon(String type) {
+    switch (type) {
+      case 'seller_approved': return Icons.verified_rounded;
+      case 'seller_rejected': return Icons.cancel_rounded;
+      case 'order_placed': return Icons.shopping_bag_rounded;
+      case 'order_ready': return Icons.check_circle_rounded;
+      default: return Icons.notifications_rounded;
+    }
+  }
+
+  Color _notifColor(String type) {
+    switch (type) {
+      case 'seller_approved': return const Color(0xFF059669);
+      case 'seller_rejected': return const Color(0xFFDC2626);
+      case 'order_placed': return const Color(0xFF1A4DBE);
+      case 'order_ready': return const Color(0xFF8B5CF6);
+      default: return const Color(0xFFF59E0B);
+    }
   }
 
   Future<void> _loadGreetingName() async {
@@ -124,9 +290,10 @@ class _HomePageState extends State<HomePage> {
     }
 
     try {
+      // Join with seller_profiles to get store name + shop hours
       final response = await Supabase.instance.client
           .from('product')
-          .select()
+          .select('*, seller_profiles!product_seller_id_fkey(store_name, is_open, opening_time, closing_time)')
           .order('id', ascending: false);
 
       if (!mounted) return;
@@ -135,72 +302,125 @@ class _HomePageState extends State<HomePage> {
         isLoading = false;
       });
     } catch (e) {
-      debugPrint("FETCH ERROR → $e");
-      if (!mounted) return;
-      setState(() => isLoading = false);
+      // Fallback: try without the join in case FK doesn't exist yet
+      debugPrint("FETCH WITH JOIN FAILED → $e — retrying plain select");
+      try {
+        final response = await Supabase.instance.client
+            .from('product')
+            .select()
+            .order('id', ascending: false);
+
+        if (!mounted) return;
+        setState(() {
+          products = response;
+          isLoading = false;
+        });
+      } catch (e2) {
+        debugPrint("FETCH ERROR → $e2");
+        if (!mounted) return;
+        setState(() => isLoading = false);
+      }
     }
   }
 
   List<dynamic> _productsForFilter() {
     final List<Map<String, dynamic>> normalized = _normalizedProducts();
 
-    if (_selectedFilter == 'All') return normalized;
+    // Apply search query first
+    List<Map<String, dynamic>> results = normalized;
+    if (_searchQuery.isNotEmpty) {
+      final q = _searchQuery.toLowerCase();
+      results = normalized.where((p) {
+        final name = (p['product_name'] ?? '').toString().toLowerCase();
+        final store = (p['store_name'] ?? '').toString().toLowerCase();
+        final cat = (p['category'] ?? '').toString().toLowerCase();
+        final desc = (p['description'] ?? '').toString().toLowerCase();
+        return name.contains(q) || store.contains(q) || cat.contains(q) || desc.contains(q);
+      }).toList();
+    }
 
+    if (_selectedFilter == 'All') return results;
+
+    // Map filter labels to DB category values + keyword fallbacks
+    final categoryMap = <String, String>{
+      'Fish': 'fish',
+      'Meat': 'meat',
+      'Vegetables': 'vegetable',
+      'Fruits': 'fruit',
+      'Apparel': 'apparel',
+    };
     final keywords = <String>{};
     switch (_selectedFilter) {
       case 'Fish':
         keywords.addAll({'fish', 'tilapia', 'bangus', 'tuna', 'galunggong'});
         break;
       case 'Meat':
-        keywords.addAll({'beef', 'pork', 'chicken', 'liempo', 'meat'});
+        keywords.addAll({'beef', 'pork', 'chicken', 'liempo', 'meat', 'kasim'});
         break;
       case 'Vegetables':
-        keywords.addAll({'vegetable', 'tomato', 'onion', 'carrot', 'cabbage'});
+        keywords.addAll({'vegetable', 'tomato', 'onion', 'carrot', 'cabbage', 'mixed'});
         break;
       case 'Fruits':
-        keywords.addAll({'fruit', 'banana', 'apple', 'mango', 'orange'});
+        keywords.addAll({'fruit', 'banana', 'apple', 'mango', 'orange', 'seasonal'});
+        break;
+      case 'Apparel':
+        keywords.addAll({'shirt', 'shoes', 'apparel', 'clothing', 'pants', 'dress'});
         break;
     }
 
-    final filtered = normalized.where((p) {
+    final categoryValue = categoryMap[_selectedFilter]?.toLowerCase() ?? '';
+
+    final filtered = results.where((p) {
+      // Match by DB category field first (most reliable for seller products)
+      final cat = (p['category'] ?? '').toString().toLowerCase();
+      if (cat.isNotEmpty && cat.contains(categoryValue)) return true;
+      // Fallback: keyword match on product name
       final name = (p['product_name'] ?? '').toString().toLowerCase();
       return keywords.any(name.contains);
     }).toList();
 
-    // Fallback keeps UI populated if product names do not contain category terms.
-    return filtered.isEmpty ? normalized : filtered;
+    return filtered;
   }
 
   List<Map<String, dynamic>> _normalizedProducts() {
-    final source = products.isEmpty ? _fallbackProducts : products;
+    final List<Map<String, dynamic>> combined = [];
 
-    return List<Map<String, dynamic>>.generate(source.length, (index) {
-      final item = Map<String, dynamic>.from(source[index] as Map);
-      final fallback = _fallbackProducts[index % _fallbackProducts.length];
+    for (final item in products) {
+      final raw = Map<String, dynamic>.from(item as Map);
 
-      String ensureText(String key) {
-        final value = item[key]?.toString().trim();
-        if (value == null || value.isEmpty) {
-          return fallback[key].toString();
-        }
-        return value;
+      // Extract joined seller_profiles data
+      String storeName = 'Market Stall';
+      bool sellerIsOpen = false;
+      String sellerOpenTime = '05:00';
+      String sellerCloseTime = '19:00';
+      final joined = raw['seller_profiles'];
+      if (joined is Map) {
+        if (joined['store_name'] != null) storeName = joined['store_name'].toString();
+        sellerIsOpen = joined['is_open'] == true;
+        sellerOpenTime = joined['opening_time']?.toString() ?? '05:00';
+        sellerCloseTime = joined['closing_time']?.toString() ?? '19:00';
       }
 
-      dynamic ensurePrice() {
-        final value = item['price'];
-        if (value == null || value.toString().trim().isEmpty) {
-          return fallback['price'];
-        }
-        return value;
-      }
+      combined.add({
+        'product_name': (raw['name'] ?? raw['product_name'] ?? 'Fresh Item').toString(),
+        'store_name': storeName,
+        'price': raw['price'] ?? 0,
+        'image_url': (raw['image_url'] != null && raw['image_url'].toString().trim().isNotEmpty)
+            ? raw['image_url'].toString()
+            : '',  // empty = show placeholder
+        'category': (raw['category'] ?? '').toString(),
+        'unit_type': (raw['unit_type'] ?? 'Kg').toString(),
+        'id': raw['id'],
+        'seller_id': raw['seller_id'] ?? raw['user_id'],
+        'description': (raw['description'] ?? '').toString(),
+        'is_db': true,
+        'seller_is_open': sellerIsOpen,
+        'opening_time': sellerOpenTime,
+        'closing_time': sellerCloseTime,
+      });
+    }
 
-      return {
-        'product_name': ensureText('product_name'),
-        'store_name': ensureText('store_name'),
-        'price': ensurePrice(),
-        'image_url': ensureText('image_url'),
-      };
-    });
+    return combined;
   }
 
   String _productName(dynamic product, [String fallback = 'Fresh Item']) {
@@ -215,10 +435,67 @@ class _HomePageState extends State<HomePage> {
     return value;
   }
 
+  /// Returns true if the seller's shop is currently open (manual toggle + within hours)
+  bool _isShopOpen(dynamic product) {
+    if (product['is_db'] != true) return true; // fallback products are always "open"
+    final isOpen = product['seller_is_open'] == true;
+    if (!isOpen) return false;
+    try {
+      final now = TimeOfDay.now();
+      final openParts = (product['opening_time'] ?? '05:00').toString().split(':');
+      final closeParts = (product['closing_time'] ?? '19:00').toString().split(':');
+      final openMin = int.parse(openParts[0]) * 60 + int.parse(openParts[1]);
+      final closeMin = int.parse(closeParts[0]) * 60 + int.parse(closeParts[1]);
+      final nowMin = now.hour * 60 + now.minute;
+      return nowMin >= openMin && nowMin <= closeMin;
+    } catch (_) {
+      return isOpen;
+    }
+  }
+
+  Widget _buildOpenClosedBadge(dynamic product) {
+    if (product['is_db'] != true) return const SizedBox.shrink();
+    final open = _isShopOpen(product);
+    final openTime = (product['opening_time'] ?? '05:00').toString();
+    final closeTime = (product['closing_time'] ?? '19:00').toString();
+    // Format display like Google Maps: "Closed · Opens 5:00 AM"
+    String label;
+    Color color;
+    if (open) {
+      color = const Color(0xFF059669);
+      label = 'Open \u00b7 Closes ${to12Hour(closeTime)}';
+    } else {
+      color = const Color(0xFFDC2626);
+      label = 'Closed \u00b7 Opens ${to12Hour(openTime)}';
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
+  }
+
   void _openCart() {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const CartPage()),
+    );
+  }
+
+  void _openProductDetail(dynamic product) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ProductViewPage(product: Map<String, dynamic>.from(product)),
+      ),
     );
   }
 
@@ -242,6 +519,11 @@ class _HomePageState extends State<HomePage> {
 
     final productName = _productName(product, 'Fresh Item');
     final price = product['price'];
+    final sellerId = product['seller_id']?.toString();
+    final productId = product['id']?.toString();
+    final imageUrl = product['image_url']?.toString();
+    final storeName = _storeName(product, 'Market Stall');
+    final unitType = (product['unit_type'] ?? 'kg').toString();
 
     try {
       final existing = await client
@@ -264,6 +546,11 @@ class _HomePageState extends State<HomePage> {
           'price': price,
           'qty': 1,
           'buyer_id': user.id,
+          'seller_id': sellerId,
+          'product_id': productId,
+          'image_url': imageUrl,
+          'store_name': storeName,
+          'unit_type': unitType,
         });
       }
 
@@ -316,35 +603,39 @@ class _HomePageState extends State<HomePage> {
               ),
               Row(
                 children: [
-                  Stack(
-                    children: [
-                      const Icon(
-                        Icons.notifications_none_rounded,
-                        color: Colors.white,
-                        size: 28,
-                      ),
-                      Positioned(
-                        right: 0,
-                        top: 0,
-                        child: Container(
-                          width: 16,
-                          height: 16,
-                          alignment: Alignment.center,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFFF5A524),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Text(
-                            '3',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
+                  GestureDetector(
+                    onTap: _showNotificationsSheet,
+                    child: Stack(
+                      children: [
+                        const Icon(
+                          Icons.notifications_none_rounded,
+                          color: Colors.white,
+                          size: 28,
+                        ),
+                        if (_notifications.any((n) => n['is_read'] != true))
+                          Positioned(
+                            right: 0,
+                            top: 0,
+                            child: Container(
+                              width: 16,
+                              height: 16,
+                              alignment: Alignment.center,
+                              decoration: const BoxDecoration(
+                                color: Color(0xFFF5A524),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Text(
+                                '${_notifications.where((n) => n['is_read'] != true).length}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                   const SizedBox(width: 14),
                   GestureDetector(
@@ -361,12 +652,25 @@ class _HomePageState extends State<HomePage> {
           ),
           const SizedBox(height: 14),
           TextField(
+            controller: _searchController,
+            onChanged: (value) {
+              setState(() => _searchQuery = value.trim());
+            },
             decoration: InputDecoration(
               hintText: "Search products or store",
               prefixIcon: const Icon(
                 Icons.search_rounded,
                 color: Colors.white70,
               ),
+              suffixIcon: _searchQuery.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white70, size: 20),
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() => _searchQuery = '');
+                      },
+                    )
+                  : null,
               filled: true,
               fillColor: const Color(0xFF173C9E),
               hintStyle: const TextStyle(color: Colors.white70),
@@ -398,54 +702,221 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
           const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF5A524),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(
+          if (_banners.isNotEmpty)
+            Column(
               children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: SizedBox(
-                    width: 44,
-                    height: 44,
-                    child: Image.asset(
-                      'assets/img/categories/vege.jpg',
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) => Container(
-                        color: Colors.white.withValues(alpha: 0.25),
-                        child: const Icon(
-                          Icons.local_offer_outlined,
-                          color: Colors.white,
+                SizedBox(
+                  height: 130,
+                  child: PageView.builder(
+                    itemCount: _banners.length,
+                    controller: PageController(viewportFraction: 1.0),
+                    itemBuilder: (context, index) {
+                      final banner = _banners[index];
+                      final storeName = banner['store_name'] ?? 'Store';
+                      final bannerUrl = banner['banner_url'] as String?;
+                      final logoUrl = banner['logo_url'] as String?;
+                      final category = banner['category'] ?? '';
+                      final isOpen = banner['is_open'] == true;
+                      final openTime = banner['opening_time']?.toString() ?? '05:00';
+                      final closeTime = banner['closing_time']?.toString() ?? '19:00';
+                      // Determine if currently within operating hours
+                      bool isWithinHours = false;
+                      try {
+                        final now = TimeOfDay.now();
+                        final openParts = openTime.split(':');
+                        final closeParts = closeTime.split(':');
+                        final openMinutes = int.parse(openParts[0]) * 60 + int.parse(openParts[1]);
+                        final closeMinutes = int.parse(closeParts[0]) * 60 + int.parse(closeParts[1]);
+                        final nowMinutes = now.hour * 60 + now.minute;
+                        isWithinHours = nowMinutes >= openMinutes && nowMinutes <= closeMinutes;
+                      } catch (_) {}
+                      final shopOpen = isOpen && isWithinHours;
+                      return Container(
+                        margin: const EdgeInsets.only(right: 4),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          color: const Color(0xFF1A4DBE),
                         ),
+                        clipBehavior: Clip.antiAlias,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            if (bannerUrl != null)
+                              Image.network(
+                                bannerUrl,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => const SizedBox(),
+                              ),
+                            Container(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.centerLeft,
+                                  end: Alignment.centerRight,
+                                  colors: [
+                                    Colors.black.withValues(alpha: 0.65),
+                                    Colors.black.withValues(alpha: 0.1),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                              child: Row(
+                                children: [
+                                  if (logoUrl != null)
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: SizedBox(
+                                        width: 48,
+                                        height: 48,
+                                        child: Image.network(
+                                          logoUrl,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (_, __, ___) => Container(
+                                            color: Colors.white24,
+                                            child: const Icon(Icons.storefront, color: Colors.white),
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                  else
+                                    Container(
+                                      width: 48,
+                                      height: 48,
+                                      decoration: BoxDecoration(
+                                        color: Colors.white24,
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: const Icon(Icons.storefront, color: Colors.white),
+                                    ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          storeName,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 17,
+                                            fontWeight: FontWeight.w900,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        const SizedBox(height: 4),
+                                        if (category.toString().isNotEmpty)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white24,
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: Text(
+                                              category.toString(),
+                                              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                                            ),
+                                          ),
+                                        const SizedBox(height: 6),
+                                        Row(
+                                          children: [
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                              decoration: BoxDecoration(
+                                                color: shopOpen ? const Color(0xFF059669) : const Color(0xFFDC2626),
+                                                borderRadius: BorderRadius.circular(6),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    shopOpen ? Icons.circle : Icons.circle,
+                                                    size: 7,
+                                                    color: Colors.white,
+                                                  ),
+                                                  const SizedBox(width: 5),
+                                                  Text(
+                                                    shopOpen ? 'Open' : 'Closed',
+                                                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              '${to12Hour(openTime)} \u2013 ${to12Hour(closeTime)}',
+                                              style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.w500),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+            ),
+          // Always show static Marketplaza banner
+          ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: SizedBox(
+              width: double.infinity,
+              height: 130,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image.asset(
+                    'assets/img/categories/Marketplaza.jpg',
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) => Container(
+                      color: const Color(0xFFF5A524),
+                    ),
+                  ),
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.60),
+                          Colors.black.withValues(alpha: 0.10),
+                        ],
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'San Fernando Market Plaza',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w900,
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'San Fernando Market Plaza',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w900,
+                          ),
                         ),
-                      ),
-                      SizedBox(height: 2),
-                      Text(
-                        'Fresh goods from local public market stalls',
-                        style: TextStyle(color: Colors.white, fontSize: 12),
-                      ),
-                    ],
+                        SizedBox(height: 4),
+                        Text(
+                          'Fresh goods from local public market stalls',
+                          style: TextStyle(color: Colors.white70, fontSize: 12),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ],
@@ -580,14 +1051,12 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildFlashDealCard(dynamic product) {
-    final imageUrl = (product['image_url'] as String?)?.trim();
-    final resolvedImage = (imageUrl == null || imageUrl.isEmpty)
-        ? _defaultAssetPath
-        : imageUrl;
+    final imageUrl = (product['image_url'] as String?)?.trim() ?? '';
+    final resolvedImage = imageUrl;
 
     final priceValue = product['price'];
-    final priceText = priceValue != null ? "₱$priceValue /kg" : "₱0";
-
+    final unit = (product['unit_type'] ?? 'kg').toString();
+    final priceText = priceValue != null ? "₱$priceValue /$unit" : "₱0";
     return Container(
       width: 220,
       margin: const EdgeInsets.only(right: 12),
@@ -637,25 +1106,7 @@ class _HomePageState extends State<HomePage> {
                     color: Color(0xFF1A4DBE),
                   ),
                 ),
-                const SizedBox(height: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFF1D7),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: const Text(
-                    'Limited Deal',
-                    style: TextStyle(
-                      color: Color(0xFFE48E00),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
+                const SizedBox(height: 3),
               ],
             ),
           ),
@@ -679,63 +1130,70 @@ class _HomePageState extends State<HomePage> {
         crossAxisCount: 2,
         crossAxisSpacing: 10,
         mainAxisSpacing: 10,
-        childAspectRatio: 1.45,
+        childAspectRatio: 0.85,
       ),
       itemBuilder: (context, index) {
         final p = essentials[index];
-        final imageUrl = (p['image_url'] as String?)?.trim();
-        final resolvedImage = (imageUrl == null || imageUrl.isEmpty)
-            ? _defaultAssetPath
-            : imageUrl;
+        final resolvedImage = (p['image_url'] as String?)?.trim() ?? '';
 
-        return Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(14),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.grey.withValues(alpha: 0.12),
-                blurRadius: 8,
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              ClipRRect(
-                borderRadius: const BorderRadius.horizontal(
-                  left: Radius.circular(14),
+        return GestureDetector(
+          onTap: () => _openProductDetail(p),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withValues(alpha: 0.12),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
                 ),
-                child: SizedBox(
-                  width: 68,
-                  height: double.infinity,
-                  child: _buildProductImage(resolvedImage),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(14),
+                  ),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 110,
+                    child: _buildProductImage(resolvedImage),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _productName(p, 'Fresh Item'),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                      ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _productName(p, 'Fresh Item'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          p['price'] != null ? '₱${p['price']}' : 'Restock now',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF1A4DBE),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                      ],
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Restock now',
-                      style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -743,22 +1201,37 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildProductImage(String imagePath) {
+    if (imagePath.isEmpty) return _imagePlaceholder();
+
     if (_isAssetPath(imagePath)) {
       return Image.asset(
         imagePath,
         fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => const ColoredBox(
-          color: Color(0xFFF1F3F9),
-          child: Icon(Icons.image_not_supported_outlined),
-        ),
+        errorBuilder: (context, error, stackTrace) => _imagePlaceholder(),
       );
     }
 
     return Image.network(
       imagePath,
       fit: BoxFit.cover,
-      errorBuilder: (context, error, stackTrace) =>
-          Image.asset(_defaultAssetPath, fit: BoxFit.cover),
+      loadingBuilder: (context, child, loadingProgress) {
+        if (loadingProgress == null) return child;
+        return _imagePlaceholder();
+      },
+      errorBuilder: (context, error, stackTrace) => _imagePlaceholder(),
+    );
+  }
+
+  Widget _imagePlaceholder() {
+    return Container(
+      color: const Color(0xFFF1F3F9),
+      child: const Center(
+        child: Icon(
+          Icons.image_outlined,
+          size: 36,
+          color: Color(0xFFB6BDCC),
+        ),
+      ),
     );
   }
 
@@ -771,6 +1244,7 @@ class _HomePageState extends State<HomePage> {
     final filteredProducts = _productsForFilter();
     final flashProducts = filteredProducts.take(6).toList();
     final recommendedProducts = filteredProducts.take(10).toList();
+    final bool hasResults = filteredProducts.isNotEmpty;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6FB),
@@ -785,14 +1259,43 @@ class _HomePageState extends State<HomePage> {
               _buildTopHeader(),
               const SizedBox(height: 14),
               _buildCategoryFilters(),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
+              if (!hasResults && !isLoading)
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 60),
+                  child: Column(
+                    children: [
+                      Icon(Icons.search_off_rounded, size: 56, color: Colors.grey[400]),
+                      const SizedBox(height: 12),
+                      Text(
+                        _searchQuery.isNotEmpty
+                            ? 'No products found for "$_searchQuery"'
+                            : 'No products available yet.\nCheck back soon!',
+                        style: TextStyle(fontSize: 15, color: Colors.grey[600]),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      TextButton(
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() {
+                            _searchQuery = '';
+                            _selectedFilter = 'All';
+                          });
+                        },
+                        child: const Text('Clear filters'),
+                      ),
+                    ],
+                  ),
+                ),
+              if (hasResults) ...[
               _buildSectionHeader(
                 'Flash Deals',
                 'Limited picks from San Fernando market stalls',
               ),
               const SizedBox(height: 12),
               SizedBox(
-                height: 100,
+                height: 110,
                 child: isLoading
                     ? const Center(child: CircularProgressIndicator())
                     : flashProducts.isEmpty
@@ -801,7 +1304,10 @@ class _HomePageState extends State<HomePage> {
                         scrollDirection: Axis.horizontal,
                         itemCount: flashProducts.length,
                         itemBuilder: (context, index) {
-                          return _buildFlashDealCard(flashProducts[index]);
+                          return GestureDetector(
+                            onTap: () => _openProductDetail(flashProducts[index]),
+                            child: _buildFlashDealCard(flashProducts[index]),
+                          );
                         },
                       ),
               ),
@@ -812,7 +1318,7 @@ class _HomePageState extends State<HomePage> {
               ),
               const SizedBox(height: 12),
               SizedBox(
-                height: 230,
+                height: 260,
                 child: isLoading
                     ? const Center(child: CircularProgressIndicator())
                     : recommendedProducts.isEmpty
@@ -823,25 +1329,33 @@ class _HomePageState extends State<HomePage> {
                         itemBuilder: (context, i) {
                           final p = recommendedProducts[i];
 
-                          final imageUrl = (p['image_url'] as String?)?.trim();
                           final resolvedImage =
-                              (imageUrl == null || imageUrl.isEmpty)
-                              ? _defaultAssetPath
-                              : imageUrl;
+                              (p['image_url'] as String?)?.trim() ?? '';
 
                           final priceValue = p['price'];
+                          final unit = (p['unit_type'] ?? 'kg').toString();
                           final priceText = priceValue != null
-                              ? "₱$priceValue /kg"
+                              ? "₱$priceValue /$unit"
                               : "₱0";
 
-                          return ProductCard(
-                            title: _productName(p, 'Fresh Item'),
-                            storeName: _storeName(p, 'San Fernando Stall'),
-                            price: priceText,
-                            imageUrl: resolvedImage,
-                            onAddPressed: () {
-                              _addToCart(p);
-                            },
+                          return GestureDetector(
+                            onTap: () => _openProductDetail(p),
+                            child: ProductCard(
+                              title: _productName(p, 'Fresh Item'),
+                              storeName: _storeName(p, 'San Fernando Stall'),
+                              price: priceText,
+                              imageUrl: resolvedImage,
+                              description: (p['description'] ?? '').toString(),
+                              isShopOpen: _isShopOpen(p),
+                              shopHoursLabel: p['is_db'] == true
+                                  ? (_isShopOpen(p)
+                                      ? 'Open · Closes ${p['closing_time'] ?? '19:00'}'
+                                      : 'Closed · Opens ${p['opening_time'] ?? '05:00'}')
+                                  : null,
+                              onAddPressed: () {
+                                _addToCart(p);
+                              },
+                            ),
                           );
                         },
                       ),
@@ -853,6 +1367,7 @@ class _HomePageState extends State<HomePage> {
               ),
               const SizedBox(height: 12),
               _buildEssentialsGrid(filteredProducts),
+              ],
             ],
           ),
         ),
@@ -866,7 +1381,10 @@ class ProductCard extends StatelessWidget {
   final String storeName;
   final String price;
   final String imageUrl;
+  final String description;
   final VoidCallback onAddPressed;
+  final bool isShopOpen;
+  final String? shopHoursLabel;
 
   const ProductCard({
     super.key,
@@ -874,7 +1392,10 @@ class ProductCard extends StatelessWidget {
     required this.storeName,
     required this.price,
     required this.imageUrl,
+    this.description = '',
     required this.onAddPressed,
+    this.isShopOpen = true,
+    this.shopHoursLabel,
   });
 
   // Helper method to check if the path is likely a local asset
@@ -882,31 +1403,40 @@ class ProductCard extends StatelessWidget {
     return path.startsWith('assets/') || path.startsWith('images/');
   }
 
+  Widget _placeholder() {
+    return Container(
+      height: 112,
+      width: double.infinity,
+      color: const Color(0xFFF1F3F9),
+      child: const Center(
+        child: Icon(Icons.image_outlined, size: 36, color: Color(0xFFB6BDCC)),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final Widget imageWidget = _isAssetPath(imageUrl)
-        ? Image.asset(
-            imageUrl,
-            height: 112,
-            width: double.infinity,
-            fit: BoxFit.cover,
-            errorBuilder: (context, error, stackTrace) => const ColoredBox(
-              color: Color(0xFFF1F3F9),
-              child: Center(child: Text('Asset Error')),
-            ),
-          )
-        : Image.network(
-            imageUrl,
-            height: 112,
-            width: double.infinity,
-            fit: BoxFit.cover,
-            errorBuilder: (context, error, stackTrace) => Image.asset(
-              "assets/img/kasim.jpg",
-              height: 112,
-              width: double.infinity,
-              fit: BoxFit.cover,
-            ),
-          );
+    final Widget imageWidget = imageUrl.isEmpty
+        ? _placeholder()
+        : _isAssetPath(imageUrl)
+            ? Image.asset(
+                imageUrl,
+                height: 112,
+                width: double.infinity,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => _placeholder(),
+              )
+            : Image.network(
+                imageUrl,
+                height: 112,
+                width: double.infinity,
+                fit: BoxFit.cover,
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return _placeholder();
+                },
+                errorBuilder: (context, error, stackTrace) => _placeholder(),
+              );
 
     return Container(
       width: 170,
@@ -943,6 +1473,28 @@ class ProductCard extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 12, color: Colors.grey),
           ),
+          if (shopHoursLabel != null) ...[
+            const SizedBox(height: 3),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              decoration: BoxDecoration(
+                color: isShopOpen
+                    ? const Color(0xFF059669).withValues(alpha: 0.1)
+                    : const Color(0xFFDC2626).withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                shopHoursLabel!,
+                style: TextStyle(
+                  color: isShopOpen ? const Color(0xFF059669) : const Color(0xFFDC2626),
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
           const Spacer(),
           Row(
             children: [

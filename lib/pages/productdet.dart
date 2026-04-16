@@ -1,5 +1,7 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../utils/helpers.dart';
 
 class ProductViewPage extends StatefulWidget {
   final Map<String, dynamic> product;
@@ -12,8 +14,66 @@ class ProductViewPage extends StatefulWidget {
 
 class _ProductViewPageState extends State<ProductViewPage> {
   int _quantity = 1;
-  bool _showNutrition = false;
   bool _showReviews = false;
+  String? _sellerLogoUrl;
+  bool _sellerIsOpen = false;
+  String _sellerOpenTime = '05:00';
+  String _sellerCloseTime = '19:00';
+  List<Map<String, dynamic>> _reviews = [];
+  double _averageRating = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchSellerLogo();
+    _fetchReviews();
+  }
+
+  Future<void> _fetchSellerLogo() async {
+    final sellerId = widget.product['seller_id']?.toString();
+    if (sellerId == null || sellerId.isEmpty) return;
+    try {
+      final resp = await Supabase.instance.client
+          .from('seller_profiles')
+          .select('logo_url, is_open, opening_time, closing_time')
+          .eq('user_id', sellerId)
+          .maybeSingle();
+      if (mounted && resp != null) {
+        setState(() {
+          _sellerLogoUrl = resp['logo_url']?.toString();
+          _sellerIsOpen = resp['is_open'] == true;
+          _sellerOpenTime = resp['opening_time']?.toString() ?? '05:00';
+          _sellerCloseTime = resp['closing_time']?.toString() ?? '19:00';
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _fetchReviews() async {
+    final productId = widget.product['id']?.toString();
+    if (productId == null || productId.isEmpty) return;
+    try {
+      final resp = await Supabase.instance.client
+          .from('reviews')
+          .select('*')
+          .eq('product_id', productId)
+          .order('created_at', ascending: false)
+          .limit(20);
+      if (mounted) {
+        final list = List<Map<String, dynamic>>.from(resp);
+        double total = 0;
+        for (final r in list) {
+          total += (r['rating'] as num?)?.toDouble() ?? 0;
+        }
+        setState(() {
+          _reviews = list;
+          _averageRating = list.isNotEmpty ? total / list.length : 0;
+        });
+      }
+    } catch (_) {
+      // reviews table may not exist yet
+    }
+  }
 
   String get _displayName {
     return (widget.product['name'] ??
@@ -23,10 +83,10 @@ class _ProductViewPageState extends State<ProductViewPage> {
   }
 
   String get _sellerName {
+    final store = widget.product['store_name']?.toString().trim();
+    if (store != null && store.isNotEmpty) return store;
     final seller = widget.product['seller_name']?.toString().trim();
-    if (seller != null && seller.isNotEmpty) {
-      return seller;
-    }
+    if (seller != null && seller.isNotEmpty) return seller;
     return 'Lienda Public Market Stall';
   }
 
@@ -78,6 +138,12 @@ class _ProductViewPageState extends State<ProductViewPage> {
     return 'Freshly sourced product from verified public market vendors. Quality checked every morning for better value and freshness.';
   }
 
+  String get _unitType {
+    final unit = widget.product['unit_type']?.toString().trim();
+    if (unit != null && unit.isNotEmpty) return unit;
+    return 'KG';
+  }
+
   String _formatPrice(double value) {
     if (value == value.truncateToDouble()) {
       return value.toStringAsFixed(0);
@@ -96,18 +162,52 @@ class _ProductViewPageState extends State<ProductViewPage> {
       return;
     }
 
+    final productName = _displayName;
+    final productId = widget.product['id']?.toString();
+
     try {
-      await supabase.from('cart').insert({
-        'product_name': _displayName,
-        'price': _priceValue,
-        'qty': _quantity,
-        'buyer_id': user.id,
-      });
+      // Check if this product is already in the cart
+      Map<String, dynamic>? existing;
+      if (productId != null && productId.isNotEmpty) {
+        existing = await supabase
+            .from('cart')
+            .select('id, qty')
+            .eq('buyer_id', user.id)
+            .eq('product_id', productId)
+            .maybeSingle();
+      }
+      existing ??= await supabase
+          .from('cart')
+          .select('id, qty')
+          .eq('buyer_id', user.id)
+          .eq('product_name', productName)
+          .maybeSingle();
+
+      if (existing != null) {
+        final currentQty = int.tryParse(existing['qty'].toString()) ?? 0;
+        await supabase
+            .from('cart')
+            .update({'qty': currentQty + _quantity})
+            .eq('id', existing['id'])
+            .eq('buyer_id', user.id);
+      } else {
+        await supabase.from('cart').insert({
+          'product_name': productName,
+          'price': _priceValue,
+          'qty': _quantity,
+          'buyer_id': user.id,
+          'seller_id': widget.product['seller_id']?.toString(),
+          'product_id': productId,
+          'image_url': widget.product['image_url']?.toString(),
+          'store_name': widget.product['store_name']?.toString() ?? 'Market Stall',
+          'unit_type': (widget.product['unit_type'] ?? 'kg').toString(),
+        });
+      }
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Added $_quantity item(s) to cart successfully!'),
+          content: Text('Added $_quantity $productName to cart!'),
         ),
       );
     } on PostgrestException catch (e) {
@@ -135,12 +235,38 @@ class _ProductViewPageState extends State<ProductViewPage> {
     }
 
     try {
-      await supabase.from('orders').insert({
+      final sellerId = widget.product['seller_id']?.toString();
+      final total = _priceValue * _quantity;
+
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      final rng = Random.secure();
+      final pickupCode = List.generate(6, (_) => chars[rng.nextInt(chars.length)]).join();
+
+      final orderRes = await supabase.from('orders').insert({
         'product_name': _displayName,
         'price': _priceValue,
         'qty': _quantity,
         'buyer_id': buyerId,
-      });
+        'seller_id': sellerId,
+        'product_id': widget.product['id']?.toString(),
+        'image_url': widget.product['image_url']?.toString(),
+        'store_name': widget.product['store_name']?.toString() ?? 'Market Stall',
+        'unit_type': (widget.product['unit_type'] ?? 'kg').toString(),
+        'total_amount': total,
+        'status': 'pending',
+        'pickup_code': pickupCode,
+      }).select('id').single();
+
+      // Notify seller
+      if (sellerId != null && sellerId.isNotEmpty) {
+        await supabase.from('seller_notifications').insert({
+          'seller_id': sellerId,
+          'order_id': orderRes['id'],
+          'title': 'New Order!',
+          'body': '$_displayName x$_quantity — ₱${total.toStringAsFixed(0)}',
+          'type': 'new_order',
+        });
+      }
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -157,6 +283,31 @@ class _ProductViewPageState extends State<ProductViewPage> {
         context,
       ).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
+  }
+
+  Widget _buildDetailImage() {
+    final imageUrl = (widget.product['image_url'] ?? '').toString().trim();
+    if (imageUrl.isEmpty) {
+      return const Center(
+        child: Icon(Icons.image_outlined, size: 54, color: Color(0xFFB6BDCC)),
+      );
+    }
+    if (imageUrl.startsWith('assets/') || imageUrl.startsWith('images/')) {
+      return Image.asset(
+        imageUrl,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => const Center(
+          child: Icon(Icons.image_not_supported_outlined, size: 54, color: Color(0xFFB6BDCC)),
+        ),
+      );
+    }
+    return Image.network(
+      imageUrl,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => const Center(
+        child: Icon(Icons.broken_image_outlined, size: 54, color: Color(0xFFB6BDCC)),
+      ),
+    );
   }
 
   @override
@@ -247,8 +398,8 @@ class _ProductViewPageState extends State<ProductViewPage> {
                       child: Column(
                         children: [
                           Container(
-                            width: 124,
-                            height: 124,
+                            width: double.infinity,
+                            height: 200,
                             decoration: BoxDecoration(
                               color: const Color(0xFFF2F3F7),
                               borderRadius: BorderRadius.circular(20),
@@ -256,10 +407,9 @@ class _ProductViewPageState extends State<ProductViewPage> {
                                 color: const Color(0xFFE5E7F0),
                               ),
                             ),
-                            child: const Icon(
-                              Icons.image_outlined,
-                              size: 54,
-                              color: Color(0xFFB6BDCC),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(20),
+                              child: _buildDetailImage(),
                             ),
                           ),
                           const SizedBox(height: 12),
@@ -305,7 +455,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
                               Text(
-                                '₱${_formatPrice(_priceValue)}/KG',
+                                '₱${_formatPrice(_priceValue)}/$_unitType',
                                 style: const TextStyle(
                                   fontSize: 24,
                                   color: Color(0xFF1A3C8C),
@@ -324,10 +474,18 @@ class _ProductViewPageState extends State<ProductViewPage> {
                           const SizedBox(height: 12),
                           Row(
                             children: [
-                              const Icon(
-                                Icons.storefront_outlined,
-                                size: 22,
-                                color: Color(0xFFB4BAC9),
+                              Container(
+                                width: 32, height: 32,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(10),
+                                  color: const Color(0xFFE8EEFF),
+                                ),
+                                clipBehavior: Clip.antiAlias,
+                                child: _sellerLogoUrl != null && _sellerLogoUrl!.isNotEmpty
+                                    ? Image.network(_sellerLogoUrl!, fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) => const Icon(
+                                            Icons.storefront_outlined, size: 18, color: Color(0xFFB4BAC9)))
+                                    : const Icon(Icons.storefront_outlined, size: 18, color: Color(0xFFB4BAC9)),
                               ),
                               const SizedBox(width: 8),
                               Expanded(
@@ -361,6 +519,52 @@ class _ProductViewPageState extends State<ProductViewPage> {
                             ],
                           ),
                           const SizedBox(height: 8),
+                          // Shop open/closed status
+                          Builder(builder: (_) {
+                            bool isWithinHours = false;
+                            try {
+                              final now = TimeOfDay.now();
+                              final op = _sellerOpenTime.split(':');
+                              final cl = _sellerCloseTime.split(':');
+                              final openMin = int.parse(op[0]) * 60 + int.parse(op[1]);
+                              final closeMin = int.parse(cl[0]) * 60 + int.parse(cl[1]);
+                              final nowMin = now.hour * 60 + now.minute;
+                              isWithinHours = nowMin >= openMin && nowMin <= closeMin;
+                            } catch (_) {}
+                            final shopOpen = _sellerIsOpen && isWithinHours;
+                            return Row(
+                              children: [
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: shopOpen ? const Color(0xFF059669) : const Color(0xFFDC2626),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  shopOpen
+                                      ? 'Open \u00b7 Closes ${to12Hour(_sellerCloseTime)}'
+                                      : 'Closed \u00b7 Opens ${to12Hour(_sellerOpenTime)}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: shopOpen ? const Color(0xFF059669) : const Color(0xFFDC2626),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  '${to12Hour(_sellerOpenTime)} \u2013 ${to12Hour(_sellerCloseTime)}',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFF9299AA),
+                                  ),
+                                ),
+                              ],
+                            );
+                          }),
+                          const SizedBox(height: 8),
                           Row(
                             children: [
                               const Icon(
@@ -388,14 +592,14 @@ class _ProductViewPageState extends State<ProductViewPage> {
                               ),
                               const SizedBox(width: 4),
                               Text(
-                                _rating.toStringAsFixed(1),
+                                (_averageRating > 0 ? _averageRating : _rating).toStringAsFixed(1),
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w700,
                                 ),
                               ),
                               const SizedBox(width: 6),
                               Text(
-                                '$_reviewCount reviews',
+                                '${_reviews.isNotEmpty ? _reviews.length : _reviewCount} reviews',
                                 style: const TextStyle(
                                   color: Color(0xFF8E95A6),
                                 ),
@@ -420,62 +624,8 @@ class _ProductViewPageState extends State<ProductViewPage> {
                             ),
                           ),
                           const SizedBox(height: 18),
-                          _detailToggle(
-                            title: 'Nutritional facts',
-                            expanded: _showNutrition,
-                            onTap: () {
-                              setState(() {
-                                _showNutrition = !_showNutrition;
-                              });
-                            },
-                          ),
-                          AnimatedCrossFade(
-                            duration: const Duration(milliseconds: 180),
-                            crossFadeState: _showNutrition
-                                ? CrossFadeState.showFirst
-                                : CrossFadeState.showSecond,
-                            firstChild: const Padding(
-                              padding: EdgeInsets.fromLTRB(2, 8, 2, 10),
-                              child: Text(
-                                'Estimated per 100g: Protein 19g, Fat 6g, Sodium 65mg. Values vary by freshness and cut from each market stall.',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: Color(0xFF7D8596),
-                                  height: 1.4,
-                                ),
-                              ),
-                            ),
-                            secondChild: const SizedBox.shrink(),
-                          ),
-                          const Divider(height: 4, color: Color(0xFFE3E6EF)),
-                          const SizedBox(height: 8),
-                          _detailToggle(
-                            title: 'Reviews',
-                            expanded: _showReviews,
-                            onTap: () {
-                              setState(() {
-                                _showReviews = !_showReviews;
-                              });
-                            },
-                          ),
-                          AnimatedCrossFade(
-                            duration: const Duration(milliseconds: 180),
-                            crossFadeState: _showReviews
-                                ? CrossFadeState.showFirst
-                                : CrossFadeState.showSecond,
-                            firstChild: const Padding(
-                              padding: EdgeInsets.fromLTRB(2, 8, 2, 0),
-                              child: Text(
-                                '"Fresh and clean cut, seller was responsive and packed well for transport."',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: Color(0xFF7D8596),
-                                  height: 1.4,
-                                ),
-                              ),
-                            ),
-                            secondChild: const SizedBox.shrink(),
-                          ),
+                          // ── Reviews section (Shopee-style) ──
+                          _buildReviewsSection(),
                         ],
                       ),
                     ),
@@ -602,34 +752,185 @@ class _ProductViewPageState extends State<ProductViewPage> {
     );
   }
 
-  Widget _detailToggle({
-    required String title,
-    required bool expanded,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(
-          children: [
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w500,
-                color: Color(0xFF303746),
+  // ── Shopee-style reviews section ──
+  Widget _buildReviewsSection() {
+    final displayRating = _averageRating > 0 ? _averageRating : _rating;
+    final displayCount = _reviews.isNotEmpty ? _reviews.length : _reviewCount;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 1, color: Color(0xFFE3E6EF)),
+        const SizedBox(height: 14),
+        // Header row
+        InkWell(
+          onTap: () => setState(() => _showReviews = !_showReviews),
+          child: Row(
+            children: [
+              const Text('Product Reviews',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF111827))),
+              const Spacer(),
+              Row(
+                children: [
+                  Text('${displayRating.toStringAsFixed(1)}/5',
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFFF5A524))),
+                  const SizedBox(width: 4),
+                  Text('($displayCount)',
+                      style: const TextStyle(fontSize: 13, color: Color(0xFF8E95A6))),
+                  const SizedBox(width: 4),
+                  Icon(_showReviews ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                      color: const Color(0xFF9AA1B2), size: 22),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        // Rating summary bar
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF8F0),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              Column(
+                children: [
+                  Text(displayRating.toStringAsFixed(1),
+                      style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w800, color: Color(0xFFF5A524))),
+                  Row(
+                    children: List.generate(5, (i) => Icon(
+                      i < displayRating.round() ? Icons.star_rounded : Icons.star_outline_rounded,
+                      size: 16, color: const Color(0xFFF5A524))),
+                  ),
+                  const SizedBox(height: 4),
+                  Text('$displayCount ratings',
+                      style: const TextStyle(fontSize: 11, color: Color(0xFF8E95A6))),
+                ],
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  children: List.generate(5, (i) {
+                    final star = 5 - i;
+                    final count = _reviews.where((r) => (r['rating'] as num?)?.toInt() == star).length;
+                    final pct = _reviews.isNotEmpty ? count / _reviews.length : 0.0;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Row(
+                        children: [
+                          Text('$star', style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+                          const Icon(Icons.star_rounded, size: 12, color: Color(0xFFF5A524)),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                value: pct,
+                                backgroundColor: const Color(0xFFE5E7EB),
+                                valueColor: const AlwaysStoppedAnimation(Color(0xFFF5A524)),
+                                minHeight: 6,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          SizedBox(
+                            width: 24,
+                            child: Text('$count', style: const TextStyle(fontSize: 11, color: Color(0xFF8E95A6)),
+                                textAlign: TextAlign.end),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ),
+              ),
+            ],
+          ),
+        ),
+        // Individual reviews
+        if (_showReviews) ...[
+          const SizedBox(height: 12),
+          if (_reviews.isEmpty)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Column(
+                children: [
+                  Icon(Icons.rate_review_outlined, size: 36, color: Colors.grey[300]),
+                  const SizedBox(height: 8),
+                  Text('No reviews yet', style: TextStyle(color: Colors.grey[500], fontSize: 14)),
+                  const SizedBox(height: 4),
+                  Text('Be the first to review this product!',
+                      style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+                ],
+              ),
+            )
+          else
+            ...(_reviews.take(5).map((r) {
+              final name = r['reviewer_name']?.toString() ?? 'Buyer';
+              final rating = (r['rating'] as num?)?.toInt() ?? 5;
+              final comment = r['comment']?.toString() ?? '';
+              final date = r['created_at']?.toString() ?? '';
+              String formattedDate = '';
+              try {
+                final dt = DateTime.parse(date).toLocal();
+                formattedDate = '${dt.month}/${dt.day}/${dt.year}';
+              } catch (_) {}
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        CircleAvatar(radius: 16,
+                            backgroundColor: const Color(0xFFE8EEFF),
+                            child: Text(name.isNotEmpty ? name[0].toUpperCase() : 'B',
+                                style: const TextStyle(color: Color(0xFF1A4DBE),
+                                    fontWeight: FontWeight.w700, fontSize: 14))),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                              Row(
+                                children: [
+                                  ...List.generate(5, (i) => Icon(
+                                    i < rating ? Icons.star_rounded : Icons.star_outline_rounded,
+                                    size: 13, color: const Color(0xFFF5A524))),
+                                  const SizedBox(width: 6),
+                                  Text(formattedDate,
+                                      style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (comment.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(comment, style: const TextStyle(fontSize: 13, color: Color(0xFF4B5563), height: 1.4)),
+                    ],
+                    const SizedBox(height: 8),
+                    const Divider(height: 1, color: Color(0xFFF3F4F6)),
+                  ],
+                ),
+              );
+            })),
+          if (_reviews.length > 5)
+            Center(
+              child: TextButton(
+                onPressed: () {},
+                child: Text('See all ${_reviews.length} reviews',
+                    style: const TextStyle(color: Color(0xFF1A4DBE), fontWeight: FontWeight.w600)),
               ),
             ),
-            const Spacer(),
-            Icon(
-              expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-              color: const Color(0xFF9AA1B2),
-            ),
-          ],
-        ),
-      ),
+        ],
+      ],
     );
   }
 

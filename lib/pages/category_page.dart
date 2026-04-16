@@ -45,6 +45,12 @@ class _CategoryPageState extends State<CategoryPage> {
       'image': 'assets/img/categories/services.jpg',
       'badge': 'Pro',
     },
+    {
+      'title': 'Apparel',
+      'subtitle': 'Shirts & more',
+      'image': 'assets/img/appareljpeg.jpg',
+      'badge': 'New',
+    },
   ];
 
   @override
@@ -431,9 +437,13 @@ class CategoryCard extends StatelessWidget {
                         errorBuilder: (context, error, stackTrace) => Container(
                           color: const Color(0xFFEAEFF9),
                           alignment: Alignment.center,
-                          child: const Icon(
-                            Icons.image_not_supported_outlined,
-                            color: Color(0xFF8A95AD),
+                          child: Text(
+                            title,
+                            style: const TextStyle(
+                              color: Color(0xFF8A95AD),
+                              fontWeight: FontWeight.w700,
+                              fontSize: 16,
+                            ),
                           ),
                         ),
                       ),

@@ -1,15 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'verification/otp.dart'; // Assuming you named your OTP file 'otp.dart'
+import 'utils/helpers.dart';
 
 // --- CONSTANTS ---
 const Color kPrimaryBlue = Color(0xFF1E88E5);
 const Color kButtonBlue = Color(0xFF334D8C);
 
 // Helper function to check if input is likely an email (contains '@' and '.')
-bool isEmail(String input) {
-  return input.contains('@') && input.contains('.');
-}
 
 // --- SIGNUP PAGE WIDGET ---
 class SignupPage extends StatefulWidget {
@@ -78,6 +76,15 @@ class _SignupPageState extends State<SignupPage> {
         );
 
         if (res.user != null) {
+          // Assign 'buyer' role so the user_roles table is never empty
+          try {
+            await supabase.from('user_roles').upsert({
+              'user_id': res.user!.id,
+              'role': 'buyer',
+            });
+          } catch (_) {
+            // Non-blocking: role will default to buyer if insert fails
+          }
           _showSnackBar("Success! Check your email for the verification link.");
           if (mounted) {
             Navigator.of(context).pop();
@@ -198,21 +205,24 @@ class _SignupPageState extends State<SignupPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Image.asset(
-                        "assets/img/logo.png",
-                        height: 96,
-                        fit: BoxFit.contain,
-                        errorBuilder: (context, error, stackTrace) {
-                          return const Text(
-                            "QUICKCART",
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 28,
-                              fontWeight: FontWeight.w900,
-                              color: kButtonBlue,
-                            ),
-                          );
-                        },
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Image.asset(
+                          "assets/img/logo.png",
+                          height: 72,
+                          fit: BoxFit.contain,
+                          errorBuilder: (context, error, stackTrace) {
+                            return const Text(
+                              "QUICKCART",
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 28,
+                                fontWeight: FontWeight.w900,
+                                color: kButtonBlue,
+                              ),
+                            );
+                          },
+                        ),
                       ),
                       const SizedBox(height: 16),
                       const Text(

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'main.dart';
+import 'pages/login_page.dart';
+import 'pages/orders_page.dart';
+import 'seller_pages/dashboard_screen.dart';
+import 'seller_pages/activate.dart';
 
 const Color kDeepBlue = Color(0xFF1E3A8A);
 
@@ -18,6 +21,9 @@ class _ProfileState extends State<Profile> {
   Map<String, dynamic>? _profileData;
   String _userEmail = '';
   bool _isLoading = true;
+  String _sellerStatus = ''; // '', 'pending', 'approved', 'rejected'
+  bool _isSeller = false;
+  int _orderCount = 0;
 
   @override
   void initState() {
@@ -26,6 +32,7 @@ class _ProfileState extends State<Profile> {
   }
 
   // --- Supabase Data Fetching & Creation ---
+
   Future<void> _fetchUserProfile() async {
     final user = supabase.auth.currentUser;
 
@@ -50,19 +57,68 @@ class _ProfileState extends State<Profile> {
       });
     }
 
+    // Check if user has a seller application (seller_profiles row)
+    try {
+      final sellerProfile = await supabase
+          .from('seller_profiles')
+          .select('approval_status')
+          .eq('user_id', user.id)
+          .maybeSingle();
+      if (sellerProfile != null) {
+        _isSeller = true;
+        _sellerStatus = sellerProfile['approval_status']?.toString().toLowerCase() ?? 'pending';
+      }
+    } catch (_) {
+      // Non-critical — leave defaults
+    }
+
+    // Fetch order count
+    try {
+      final orderRes = await supabase
+          .from('orders')
+          .select('id')
+          .eq('buyer_id', user.id);
+      if (mounted) setState(() => _orderCount = (orderRes as List).length);
+    } catch (_) {}
+
     try {
       final response = await supabase
           .from('profile')
           .select()
           .eq('user_id', user.id)
-          .limit(1)
-          .single();
+          .maybeSingle(); // returns null instead of throwing
 
-      if (mounted) {
-        setState(() {
-          _profileData = response;
-          _isLoading = false;
-        });
+      if (response != null) {
+        if (mounted) {
+          setState(() {
+            _profileData = response;
+            _isLoading = false;
+          });
+        }
+      } else {
+        // No profile found — create one
+        final defaultName = userEmail.split('@')[0];
+        final newProfile = {
+          'user_id': user.id,
+          'email': userEmail,
+          'name': defaultName,
+        };
+
+        try {
+          await supabase.from('profile').insert(newProfile);
+          if (mounted) {
+            setState(() {
+              _profileData = newProfile;
+              _isLoading = false;
+            });
+            _showSnackBar("Profile created!");
+          }
+        } on PostgrestException catch (e) {
+          if (mounted) {
+            _showSnackBar("Error creating profile: ${e.message}");
+            setState(() => _isLoading = false);
+          }
+        }
       }
     } on PostgrestException catch (e) {
       debugPrint(
@@ -113,6 +169,47 @@ class _ProfileState extends State<Profile> {
         });
       }
     }
+  }
+
+  void _showGenderPicker(String key) {
+    final selectedGender = _profileData?['gender']?.toString();
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Select Gender',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              for (final option in ['Male', 'Female', 'Prefer not to say'])
+                ListTile(
+                  title: Text(option),
+                  leading: Icon(
+                    selectedGender == option
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    color: selectedGender == option ? kDeepBlue : Colors.grey,
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _updateProfileField(key, option);
+                  },
+                ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   // --- Supabase Data Update Function ---
@@ -461,19 +558,22 @@ class _ProfileState extends State<Profile> {
               children: [
                 Expanded(
                   child: InkWell(
-                    onTap: () => _showSnackBar('Orders feature coming soon.'),
-                    child: const Column(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const OrdersPage()),
+                    ),
+                    child: Column(
                       children: [
                         Text(
-                          '12',
-                          style: TextStyle(
+                          '$_orderCount',
+                          style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w800,
                             fontSize: 18,
                           ),
                         ),
-                        SizedBox(height: 2),
-                        Text(
+                        const SizedBox(height: 2),
+                        const Text(
                           'Orders',
                           style: TextStyle(color: Colors.white70, fontSize: 12),
                         ),
@@ -484,11 +584,11 @@ class _ProfileState extends State<Profile> {
                 Container(width: 1, height: 28, color: Colors.white24),
                 Expanded(
                   child: InkWell(
-                    onTap: () => _showSnackBar('Wishlist feature coming soon.'),
+                    onTap: null,
                     child: const Column(
                       children: [
                         Text(
-                          '8',
+                          '0',
                           style: TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w800,
@@ -507,11 +607,11 @@ class _ProfileState extends State<Profile> {
                 Container(width: 1, height: 28, color: Colors.white24),
                 Expanded(
                   child: InkWell(
-                    onTap: () => _showSnackBar('Vouchers feature coming soon.'),
+                    onTap: null,
                     child: const Column(
                       children: [
                         Text(
-                          '3',
+                          '0',
                           style: TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w800,
@@ -639,6 +739,171 @@ class _ProfileState extends State<Profile> {
     );
   }
 
+  Widget _buildSellerSection() {
+    // Approved seller → show dashboard button
+    if (_isSeller && _sellerStatus == 'approved') {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: InkWell(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ShopDashboardScreen()),
+            );
+          },
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF283A97), Color(0xFF3455EB)],
+              ),
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x22000000),
+                  blurRadius: 12,
+                  offset: Offset(0, 5),
+                ),
+              ],
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.storefront_rounded, color: Colors.white, size: 28),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Seller Dashboard',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'Manage your store, orders & products',
+                        style: TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.arrow_forward_ios, color: Colors.white70, size: 16),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Pending seller → show status
+    if (_isSeller && _sellerStatus == 'pending') {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF7E8),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFFFD180)),
+          ),
+          child: const Row(
+            children: [
+              Icon(Icons.hourglass_top_rounded, color: Color(0xFF7A4A00), size: 24),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Seller Application Pending',
+                      style: TextStyle(
+                        color: Color(0xFF7A4A00),
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Your store is under review. You\'ll get access once approved.',
+                      style: TextStyle(color: Color(0xFF7A4A00), fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Not a seller → show "Start Selling" button
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: InkWell(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const ActivateQuickcartScreen()),
+          );
+        },
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.grey.shade200),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x14000000),
+                blurRadius: 12,
+                offset: Offset(0, 5),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: kDeepBlue.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.storefront_outlined, color: kDeepBlue, size: 24),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Start Selling',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Set up your store and start earning',
+                      style: TextStyle(color: Colors.black54, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.arrow_forward_ios, color: Colors.grey, size: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -660,14 +925,6 @@ class _ProfileState extends State<Profile> {
             children: [
               Row(
                 children: [
-                  IconButton(
-                    style: IconButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: Colors.black87,
-                    ),
-                    icon: const Icon(Icons.arrow_back),
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
                   const SizedBox(width: 8),
                   const Expanded(
                     child: Text(
@@ -679,21 +936,13 @@ class _ProfileState extends State<Profile> {
                       ),
                     ),
                   ),
-                  IconButton(
-                    style: IconButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: kDeepBlue,
-                    ),
-                    onPressed: () {
-                      _showSnackBar('Settings feature coming soon.');
-                    },
-                    icon: const Icon(Icons.settings_outlined),
-                  ),
+
                 ],
               ),
               const SizedBox(height: 12),
               _buildProfileHeader(),
               const SizedBox(height: 14),
+              _buildSellerSection(),
               const Text(
                 'Quick Actions',
                 style: TextStyle(
@@ -710,7 +959,10 @@ class _ProfileState extends State<Profile> {
                       icon: Icons.receipt_long_rounded,
                       label: 'My Orders',
                       onTap: () {
-                        _showSnackBar('Orders feature coming soon.');
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const OrdersPage()),
+                        );
                       },
                     ),
                   ),
@@ -719,9 +971,7 @@ class _ProfileState extends State<Profile> {
                     child: _buildQuickActionTile(
                       icon: Icons.location_on_outlined,
                       label: 'Addresses',
-                      onTap: () {
-                        _showSnackBar('Address book feature coming soon.');
-                      },
+                      onTap: () {},
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -729,9 +979,7 @@ class _ProfileState extends State<Profile> {
                     child: _buildQuickActionTile(
                       icon: Icons.discount_outlined,
                       label: 'Vouchers',
-                      onTap: () {
-                        _showSnackBar('Vouchers feature coming soon.');
-                      },
+                      onTap: () {},
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -739,9 +987,7 @@ class _ProfileState extends State<Profile> {
                     child: _buildQuickActionTile(
                       icon: Icons.support_agent_rounded,
                       label: 'Help',
-                      onTap: () {
-                        _showSnackBar('Support feature coming soon.');
-                      },
+                      onTap: () {},
                     ),
                   ),
                 ],
@@ -775,7 +1021,7 @@ class _ProfileState extends State<Profile> {
                       'Gender',
                       'gender',
                       profile?['gender'],
-                      isEditable: true,
+                      onTap: () => _showGenderPicker('gender'), // ← add this
                     ),
                     Divider(height: 0, color: Colors.grey.shade200),
                     _buildProfileRow(

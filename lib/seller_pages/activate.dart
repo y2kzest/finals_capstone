@@ -1,69 +1,11 @@
 // activate.dart
 
 import 'package:flutter/material.dart';
-// IMPORTANT: Add these imports for navigation
-import 'package:caps_finals/main.dart';
-import 'seller_signin.dart';
+import 'fill_business_info.dart';
 
 // Define the primary color constant
 const Color kPrimaryColor = Color(0xFF283A97);
 
-void main() {
-  runApp(const Activate());
-}
-
-class Activate extends StatelessWidget {
-  const Activate({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Activate Quickcart',
-      theme: ThemeData(
-        primarySwatch: Colors.indigo,
-        scaffoldBackgroundColor: Colors.white,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.white,
-          elevation: 0,
-          iconTheme: IconThemeData(color: Colors.black),
-        ),
-      ),
-      home: const ActivateQuickcartScreen(),
-    );
-  }
-}
-
-// --- Placeholder for main.dart (Sign In) ---
-// DELETE THIS SECTION if main.dart is already a separate file!
-class MainScreen extends StatelessWidget {
-  const MainScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Main / Sign In Screen')),
-      body: const Center(child: Text('Navigated to Main Screen.')),
-    );
-  }
-}
-// ----------------------------------------------
-
-// --- Placeholder for fill_business_info.dart ---
-// DELETE THIS SECTION if fill_business_info.dart is already a separate file!
-class FillBusinessInfoScreen extends StatelessWidget {
-  const FillBusinessInfoScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Fill Business Info')),
-      body: const Center(
-        child: Text('Navigated to Fill Business Info Screen.'),
-      ),
-    );
-  }
-}
-// ----------------------------------------------
 
 class ActivateQuickcartScreen extends StatelessWidget {
   const ActivateQuickcartScreen({super.key});
@@ -222,7 +164,7 @@ class ActivateQuickcartScreen extends StatelessWidget {
                 onPressed: () {
                   Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (context) => const SellerSignInPage(),
+                      builder: (context) => const FillBusinessInfoPage(),
                     ),
                   );
                 },
@@ -244,28 +186,19 @@ class ActivateQuickcartScreen extends StatelessWidget {
             ),
             const SizedBox(height: 20),
 
-            // Sign In Link
+            // Go back link
             Center(
               child: GestureDetector(
-                // NAVIGATE: Back to Sign In directs to main.dart
                 onTap: () {
-                  Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(builder: (context) => const LoginPage()),
-                  );
+                  if (Navigator.of(context).canPop()) {
+                    Navigator.of(context).pop();
+                  }
                 },
-                child: Text.rich(
-                  TextSpan(
-                    text: 'Already have an account? ',
-                    style: const TextStyle(color: Colors.black54),
-                    children: <TextSpan>[
-                      TextSpan(
-                        text: 'Back to Sign In',
-                        style: TextStyle(
-                          color: kPrimaryColor,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
+                child: Text(
+                  'Go back',
+                  style: TextStyle(
+                    color: kPrimaryColor,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
               ),

@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'fill_business_info.dart'; // Assuming this page exists for navigation
+import '../services/seller_approval_notifications.dart';
+import '../bahay.dart';
+import 'fill_business_info.dart';
 
 class SellerSignInPage extends StatefulWidget {
   const SellerSignInPage({super.key});
@@ -30,6 +32,38 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
   bool _navigatedAfterAuth = false;
   late final StreamSubscription<AuthState> _authSub;
 
+  Future<void> _resendVerificationEmail(String email) async {
+    try {
+      await supabase.auth.resend(type: OtpType.signup, email: email);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Verification email resent to $email'),
+            backgroundColor: const Color(0xFF25509E),
+          ),
+        );
+      }
+    } on AuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Resend failed: ${e.message}'),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Resend failed: $e'),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -37,12 +71,44 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
       if (data.event == AuthChangeEvent.signedIn && !_navigatedAfterAuth) {
         _navigatedAfterAuth = true;
         if (!mounted) return;
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const FillBusinessInfoPage()),
-        );
+        _navigateAfterSignIn();
       }
     });
+  }
+
+  Future<void> _navigateAfterSignIn() async {
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null || !mounted) return;
+
+    try {
+      final profile = await supabase
+          .from('seller_profiles')
+          .select('user_id')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+      if (!mounted) return;
+      if (profile != null) {
+        // Profile already exists — go to buyer app (dashboard accessible from Profile)
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const Bahay()),
+          (route) => false,
+        );
+      } else {
+        // New seller — complete profile setup
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const FillBusinessInfoPage()),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const FillBusinessInfoPage()),
+      );
+    }
   }
 
   // 4. The Function to Register the Seller - WITH ADDED DEBUG LOGGING
@@ -80,6 +146,40 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
     setState(() => _isLoading = true);
 
     try {
+      // Preferred path: create a seller candidate directly via Edge Function.
+      // This avoids SMTP/verification blocking and queues vendor pending for admin.
+      try {
+        final directResult = await SellerApprovalNotifications()
+            .registerSellerCandidate(email: email, password: password);
+
+        if (directResult['ok'] == true) {
+          await supabase.auth.signInWithPassword(
+            email: email,
+            password: password,
+          );
+          if (!mounted) return;
+          _navigatedAfterAuth = true;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Seller account created and queued for admin approval.',
+              ),
+              backgroundColor: Color(0xFF25509E),
+              duration: Duration(seconds: 6),
+            ),
+          );
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const FillBusinessInfoPage(),
+            ),
+          );
+          return;
+        }
+      } catch (directError) {
+        debugPrint('Direct seller candidate path unavailable: $directError');
+      }
+
       // --- SUPABASE SIGN UP ---
       final AuthResponse res = await supabase.auth.signUp(
         email: email,
@@ -107,13 +207,29 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
         }
       } else if (res.user != null && res.session == null) {
         // Case 2: Sign up successful, but email confirmation is REQUIRED (Session is null)
+        try {
+          await SellerApprovalNotifications().registerSellerCandidate(
+            email: email,
+            userId: res.user!.id,
+          );
+          debugPrint('Seller candidate queued for admin approval.');
+        } catch (queueError) {
+          debugPrint('Queue seller candidate failed: $queueError');
+        }
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
+            SnackBar(
               content: Text(
-                "Success! Please check your email for a confirmation link to activate your account and log in.",
+                "Account created and queued for admin review. Email verification is optional for this flow.",
               ),
               backgroundColor: Colors.orange,
+              duration: const Duration(seconds: 8),
+              action: SnackBarAction(
+                label: 'Resend',
+                textColor: Colors.white,
+                onPressed: () => _resendVerificationEmail(email),
+              ),
             ),
           );
         }
@@ -136,10 +252,77 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
       // This catches specific Supabase Auth errors (e.g., duplicate user, weak password)
       debugPrint("SUPABASE AUTH ERROR: ${e.statusCode} | ${e.message}");
       if (mounted) {
+        final errorText = e.message.toLowerCase();
+        final isConfirmationEmailFailure =
+            errorText.contains('error sending confirmation email') ||
+            errorText.contains('unexpected_failure');
+
+        if (isConfirmationEmailFailure) {
+          try {
+            final fallbackResult = await SellerApprovalNotifications()
+                .registerSellerCandidate(email: email, password: password);
+
+            if (fallbackResult['ok'] == true) {
+              await supabase.auth.signInWithPassword(
+                email: email,
+                password: password,
+              );
+
+              if (!mounted) return;
+              _navigatedAfterAuth = true;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Seller account created without email verification and queued for admin approval.',
+                  ),
+                  backgroundColor: Color(0xFF25509E),
+                  duration: Duration(seconds: 8),
+                ),
+              );
+
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const FillBusinessInfoPage(),
+                ),
+              );
+              return;
+            }
+
+            final fallbackMessage =
+                fallbackResult['message']?.toString() ??
+                'Unable to create seller account without email confirmation.';
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(fallbackMessage),
+                backgroundColor: Colors.red.shade700,
+                duration: const Duration(seconds: 8),
+              ),
+            );
+            return;
+          } catch (fallbackError) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Fallback signup failed: $fallbackError'),
+                backgroundColor: Colors.red.shade700,
+                duration: const Duration(seconds: 8),
+              ),
+            );
+            return;
+          }
+        }
+
+        final userMessage = isConfirmationEmailFailure
+            ? 'Signup failed because Supabase could not send confirmation email. Check Authentication > Email SMTP: sender must be verified in Resend, host smtp.resend.com, port 587, username resend, and valid SMTP key.'
+            : 'Error: ${e.message}';
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text("Error: ${e.message}"),
+            content: Text(userMessage),
             backgroundColor: Colors.red.shade700,
+            duration: const Duration(seconds: 8),
           ),
         );
       }

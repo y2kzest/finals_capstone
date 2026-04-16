@@ -1,22 +1,15 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'fill_profile.dart'; // Contains BusinessProfileScreen
-import 'package:flutter/foundation.dart'
-    show kIsWeb; // Needed for platform checks
-
-// --- CONDITIONAL DEPENDENCIES for File Picking ---
-// Use this pattern to prevent compilation errors on the web.
-import 'dart:io' if (dart.library.html) 'dart:io';
-import 'package:file_picker/file_picker.dart'
-    if (dart.library.html) 'package:file_picker/file_picker.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:path/path.dart';
-// ----------------------------------------------
 
 // Defined constants for consistent design
 const Color kPrimaryBlue = Color(0xFF3455EB);
 const Color kInactiveGrey = Color(0xFFE0E0E0);
 const Color kTextGrey = Color(0xFF757575);
-const int kTotalSteps = 6; // Now consistently 6
+const int kTotalSteps = 3;
 
 class FillBusinessInfoPage extends StatefulWidget {
   const FillBusinessInfoPage({super.key});
@@ -34,45 +27,19 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
   int _permitCount = 0;
   bool _hasBankAccount = false;
   String? _logoUrl;
+  String? _bannerUrl;
+  final List<String> _permitUrls = [];
 
-  // 🎯 NEW: State for Steps 5 and 6 (Simulated/Placeholder)
-  bool _productsAdded = false;
-  bool _contactInfoSet = false;
+  // Shop hours
+  TimeOfDay _openingTime = const TimeOfDay(hour: 5, minute: 0);
+  TimeOfDay _closingTime = const TimeOfDay(hour: 19, minute: 0);
 
-  // Calculates the number of completed steps out of 6 total steps
+  // Calculates the number of completed steps out of 3 total steps
   int get _completedSteps {
     int steps = 0;
-
-    // Step 1: Store Information (Name & Category)
-    if (_storeNameController.text.isNotEmpty) {
-      steps++;
-    }
-
-    // Step 2: Bank Accounts
-    if (_hasBankAccount) {
-      steps++;
-    }
-
-    // Step 3: Permits
-    if (_permitCount > 0) {
-      steps++;
-    }
-
-    // Step 4: Logo Upload
-    if (_logoUrl != null) {
-      steps++;
-    }
-
-    // Step 5: Products/Services (NEW TRACKING)
-    if (_productsAdded) {
-      steps++;
-    }
-
-    // Step 6: Store Contact (NEW TRACKING)
-    if (_contactInfoSet) {
-      steps++;
-    }
-
+    if (_hasBankAccount) steps++;
+    if (_permitCount > 0) steps++;
+    if (_logoUrl != null) steps++;
     return steps;
   }
 
@@ -96,43 +63,7 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
     );
   }
 
-  // 🎯 NEW: Simulation for Products/Services Step
-  void _simulateProductsAdded(BuildContext context) async {
-    _showActionSnackbar(
-      context,
-      "Simulating product listing and inventory setup...",
-    );
-    await Future.delayed(const Duration(milliseconds: 500));
-    if (!context.mounted) return;
-    setState(() {
-      _productsAdded = true;
-    });
-    _showActionSnackbar(
-      context,
-      "Products/Services marked as complete!",
-      isError: false,
-    );
-  }
-
-  // 🎯 NEW: Simulation for Contact Info Step
-  void _simulateContactSet(BuildContext context) async {
-    _showActionSnackbar(
-      context,
-      "Simulating setting up store contact details...",
-    );
-    await Future.delayed(const Duration(milliseconds: 500));
-    if (!context.mounted) return;
-    setState(() {
-      _contactInfoSet = true;
-    });
-    _showActionSnackbar(
-      context,
-      "Contact Information marked as complete!",
-      isError: false,
-    );
-  }
-
-  // --- LOGO UPLOAD FUNCTION (SIMULATED) ---
+  // --- LOGO UPLOAD FUNCTION ---
   Future<void> _uploadLogo(BuildContext context) async {
     final supabase = Supabase.instance.client;
     final userId = supabase.auth.currentUser?.id;
@@ -142,44 +73,127 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
       return;
     }
 
-    if (kIsWeb) {
-      // Simulate successful file pick and upload on Web
-      _showActionSnackbar(context, "Web Platform: Logo upload simulated.");
-      await Future.delayed(const Duration(milliseconds: 500));
-      if (!context.mounted) return;
-      setState(() {
-        // Simulate a successful upload by setting a placeholder URL
-        _logoUrl = "https://placehold.co/100x100/3455EB/FFFFFF/png?text=LOGO";
-      });
-      _showActionSnackbar(
-        context,
-        "Logo simulated uploaded successfully!",
-        isError: false,
+    FilePickerResult? result;
+    try {
+      result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+        withData: true, // Required for web to get bytes
       );
+    } catch (e) {
+      if (!context.mounted) return;
+      _showActionSnackbar(context, "File Picker Error: $e", isError: true);
       return;
     }
 
-    // --- REAL LOGIC (Mobile/Desktop) ---
-    // Note: Actual logic would involve FilePicker, upload, and getting the public URL.
-    _showActionSnackbar(
-      context,
-      "Mobile/Desktop: Logo upload functionality placeholder.",
-    );
-
-    // Fallback simulation for non-web environments without file access
-    await Future.delayed(const Duration(milliseconds: 500));
     if (!context.mounted) return;
-    setState(() {
-      _logoUrl = "https://placehold.co/100x100/3455EB/FFFFFF/png?text=LOGO";
-    });
-    _showActionSnackbar(
-      context,
-      "Logo simulated uploaded successfully!",
-      isError: false,
-    );
+    if (result == null || result.files.isEmpty) {
+      _showActionSnackbar(context, "No file selected.");
+      return;
+    }
+
+    final pickedFile = result.files.single;
+    final Uint8List? fileBytes = pickedFile.bytes;
+
+    if (fileBytes == null || fileBytes.isEmpty) {
+      _showActionSnackbar(context, "Could not read file data.", isError: true);
+      return;
+    }
+
+    final ext = pickedFile.extension ?? 'png';
+    final uploadPath = '$userId/logo.$ext';
+
+    _showActionSnackbar(context, "Uploading logo...");
+
+    try {
+      await supabase.storage.from('logos').uploadBinary(
+        uploadPath,
+        fileBytes,
+        fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
+      );
+
+      final publicUrl = supabase.storage.from('logos').getPublicUrl(uploadPath);
+
+      if (!context.mounted) return;
+      setState(() {
+        _logoUrl = publicUrl;
+      });
+      _showActionSnackbar(context, "Logo uploaded successfully!");
+    } on StorageException catch (e) {
+      if (!context.mounted) return;
+      _showActionSnackbar(context, "Upload Error: ${e.message}", isError: true);
+    } catch (e) {
+      if (!context.mounted) return;
+      _showActionSnackbar(context, "Upload failed: $e", isError: true);
+    }
   }
 
-  // --- PERMIT ATTACHMENT FUNCTION (REAL FILE PICKER LOGIC) ---
+  // --- BANNER UPLOAD FUNCTION ---
+  Future<void> _uploadBanner(BuildContext context) async {
+    final supabase = Supabase.instance.client;
+    final userId = supabase.auth.currentUser?.id;
+
+    if (userId == null) {
+      _showActionSnackbar(context, "Error: User not logged in.", isError: true);
+      return;
+    }
+
+    FilePickerResult? result;
+    try {
+      result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+        withData: true,
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      _showActionSnackbar(context, "File Picker Error: $e", isError: true);
+      return;
+    }
+
+    if (!context.mounted) return;
+    if (result == null || result.files.isEmpty) {
+      _showActionSnackbar(context, "No file selected.");
+      return;
+    }
+
+    final pickedFile = result.files.single;
+    final Uint8List? fileBytes = pickedFile.bytes;
+
+    if (fileBytes == null || fileBytes.isEmpty) {
+      _showActionSnackbar(context, "Could not read file data.", isError: true);
+      return;
+    }
+
+    final ext = pickedFile.extension ?? 'png';
+    final uploadPath = '$userId/banner.$ext';
+
+    _showActionSnackbar(context, "Uploading banner...");
+
+    try {
+      await supabase.storage.from('logos').uploadBinary(
+        uploadPath,
+        fileBytes,
+        fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
+      );
+
+      final publicUrl = supabase.storage.from('logos').getPublicUrl(uploadPath);
+
+      if (!context.mounted) return;
+      setState(() {
+        _bannerUrl = publicUrl;
+      });
+      _showActionSnackbar(context, "Banner uploaded successfully!");
+    } on StorageException catch (e) {
+      if (!context.mounted) return;
+      _showActionSnackbar(context, "Upload Error: ${e.message}", isError: true);
+    } catch (e) {
+      if (!context.mounted) return;
+      _showActionSnackbar(context, "Upload failed: $e", isError: true);
+    }
+  }
+
+  // --- PERMIT ATTACHMENT FUNCTION ---
   Future<void> _attachPermitPhoto(BuildContext context) async {
     final supabase = Supabase.instance.client;
     final userId = supabase.auth.currentUser?.id;
@@ -187,89 +201,65 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
     if (userId == null) {
       _showActionSnackbar(
         context,
-        "Error: User not logged in. Please ensure Supabase auth is set up.",
+        "Error: User not logged in.",
         isError: true,
       );
       return;
     }
 
-    if (kIsWeb) {
-      _showActionSnackbar(
-        context,
-        "Web Platform detected: File uploading is simulated.",
-      );
-      await Future.delayed(const Duration(milliseconds: 500));
-      if (!context.mounted) return;
-      setState(() {
-        _permitCount++;
-      });
-      _showActionSnackbar(
-        context,
-        "Permit photo simulated uploaded successfully! Count: $_permitCount",
-        isError: false,
-      );
-      return;
-    }
-
-    // --- REAL LOGIC (Mobile/Desktop) ---
     FilePickerResult? result;
     try {
       result = await FilePicker.platform.pickFiles(
         type: FileType.image,
         allowMultiple: false,
+        withData: true, // Required for web to get bytes
       );
     } catch (e) {
       if (!context.mounted) return;
-      _showActionSnackbar(
-        context,
-        "File Picker Error. Check platform configurations.",
-        isError: true,
-      );
+      _showActionSnackbar(context, "File Picker Error: $e", isError: true);
       return;
     }
 
     if (!context.mounted) return;
-
-    if (result == null || result.files.single.path == null) {
+    if (result == null || result.files.isEmpty) {
       _showActionSnackbar(context, "No file selected.");
       return;
     }
 
-    final file = result.files.single;
-    final filePath = file.path!;
-    final fileName = basename(filePath);
+    final pickedFile = result.files.single;
+    final Uint8List? fileBytes = pickedFile.bytes;
+
+    if (fileBytes == null || fileBytes.isEmpty) {
+      _showActionSnackbar(context, "Could not read file data.", isError: true);
+      return;
+    }
+
+    final fileName = pickedFile.name;
+    final uploadPath = '$userId/permits/$fileName';
 
     _showActionSnackbar(context, "Uploading $fileName...");
 
     try {
-      final fileBytes = await File(filePath).readAsBytes();
-      if (!context.mounted) return;
-      final uploadPath = '$userId/permits/$fileName';
+      await supabase.storage.from('Permits').uploadBinary(
+        uploadPath,
+        fileBytes,
+        fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
+      );
 
-      await supabase.storage
-          .from('Permits')
-          .uploadBinary(
-            uploadPath,
-            fileBytes,
-            fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
-          );
+      final permitPublicUrl = supabase.storage.from('Permits').getPublicUrl(uploadPath);
 
       if (!context.mounted) return;
       setState(() {
         _permitCount++;
+        _permitUrls.add(permitPublicUrl);
       });
       _showActionSnackbar(
         context,
         "Permit photo uploaded successfully! Count: $_permitCount",
-        isError: false,
       );
     } on StorageException catch (e) {
       if (!context.mounted) return;
-      _showActionSnackbar(
-        context,
-        "Supabase Upload Error: ${e.message}",
-        isError: true,
-      );
+      _showActionSnackbar(context, "Upload Error: ${e.message}", isError: true);
     } catch (e) {
       if (!context.mounted) return;
       _showActionSnackbar(context, "Upload failed: $e", isError: true);
@@ -291,7 +281,6 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
     }
 
     if (_completedSteps < kTotalSteps) {
-      // Check that ALL 6 steps are done
       _showActionSnackbar(
         context,
         "Please complete all $kTotalSteps steps before proceeding.",
@@ -303,17 +292,31 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
     _showActionSnackbar(context, "Saving business data...", isError: false);
 
     try {
-      // 🎯 Collect all business information into a map
+      String? fullName;
+      try {
+        final profile = await supabase
+            .from('profile')
+            .select('name')
+            .eq('user_id', userId)
+            .maybeSingle();
+        fullName = profile?['name']?.toString();
+      } catch (_) {}
+      fullName ??= supabase.auth.currentUser?.email?.split('@')[0] ?? 'Seller';
+
       final businessData = {
-        'user_id': userId, // Ensure we link it to the current user
+        'user_id': userId,
+        'full_name': fullName,
         'store_name': _storeNameController.text,
         'category': _selectedBusinessCategory,
         'has_bank_account': _hasBankAccount,
         'permit_count': _permitCount,
+        'permit_urls': _permitUrls,
         'logo_url': _logoUrl,
-        'products_added': _productsAdded, // NEW FIELD
-        'contact_info_set': _contactInfoSet, // NEW FIELD
-        'is_info_complete': true, // Mark this stage as complete
+        'banner_url': _bannerUrl,
+        'opening_time': '${_openingTime.hour.toString().padLeft(2, '0')}:${_openingTime.minute.toString().padLeft(2, '0')}',
+        'closing_time': '${_closingTime.hour.toString().padLeft(2, '0')}:${_closingTime.minute.toString().padLeft(2, '0')}',
+        'is_open': false,
+        'is_info_complete': true,
         'created_at': DateTime.now().toIso8601String(),
       };
 
@@ -613,6 +616,141 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
             ),
             const SizedBox(height: 24),
 
+            // Banner Upload Area
+            const Text(
+              "Store Banner",
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              "This banner will appear on the marketplace homepage.",
+              style: TextStyle(color: kTextGrey, fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            InkWell(
+              onTap: () => _uploadBanner(context),
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                width: double.infinity,
+                height: 140,
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: _bannerUrl != null ? kPrimaryBlue : kInactiveGrey,
+                    width: 2,
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  color: Colors.grey.shade50,
+                ),
+                child: _bannerUrl != null
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Image.network(
+                          _bannerUrl!,
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                          errorBuilder: (context, error, stackTrace) =>
+                              _buildDefaultBanner(),
+                        ),
+                      )
+                    : _buildDefaultBanner(),
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Shop Hours Section
+            const Text(
+              "Shop Hours",
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              "Set your daily opening and closing hours. You can toggle open/closed manually from your dashboard.",
+              style: TextStyle(color: kTextGrey, fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: () async {
+                      final picked = await showTimePicker(
+                        context: context,
+                        initialTime: _openingTime,
+                        helpText: 'Select opening time',
+                      );
+                      if (picked != null) setState(() => _openingTime = picked);
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.wb_sunny_outlined, color: Color(0xFF059669), size: 20),
+                          const SizedBox(width: 10),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Opens at', style: TextStyle(color: kTextGrey, fontSize: 11)),
+                              const SizedBox(height: 2),
+                              Text(
+                                _openingTime.format(context),
+                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: InkWell(
+                    onTap: () async {
+                      final picked = await showTimePicker(
+                        context: context,
+                        initialTime: _closingTime,
+                        helpText: 'Select closing time',
+                      );
+                      if (picked != null) setState(() => _closingTime = picked);
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.nights_stay_outlined, color: Color(0xFFDC2626), size: 20),
+                          const SizedBox(width: 10),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Closes at', style: TextStyle(color: kTextGrey, fontSize: 11)),
+                              const SizedBox(height: 2),
+                              Text(
+                                _closingTime.format(context),
+                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+
             // 2. Business Category Dropdown
             const Text(
               "Business Category",
@@ -736,17 +874,7 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
                   const Divider(height: 20, thickness: 1, color: kInactiveGrey),
 
                   // List items
-                  // Step 1: Store Information
-                  _ListItem(
-                    title: 'Store Information (Name & Category)',
-                    subtitle: 'Fill in basic store information',
-                    onTap: () => _showActionSnackbar(
-                      context,
-                      'Store Information fields are above this progress box.',
-                    ),
-                    isCompleted: _storeNameController.text.isNotEmpty,
-                  ),
-                  // Step 2: Logo Upload
+                  // Step 1: Logo Upload
                   _ListItem(
                     title: 'Business Logo',
                     subtitle: _logoUrl != null
@@ -830,25 +958,7 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
                     ),
                   ),
 
-                  // Step 5: Products/Services (NEW)
-                  _ListItem(
-                    title: 'Products/Services Listing',
-                    subtitle: _productsAdded
-                        ? 'Product list simulated.'
-                        : 'Add your first products or services.',
-                    onTap: () => _simulateProductsAdded(context),
-                    isCompleted: _productsAdded,
-                  ),
 
-                  // Step 6: Store Contact (NEW)
-                  _ListItem(
-                    title: 'Store Contact Information',
-                    subtitle: _contactInfoSet
-                        ? 'Contact details simulated.'
-                        : 'Set up your customer support contact details.',
-                    onTap: () => _simulateContactSet(context),
-                    isCompleted: _contactInfoSet,
-                  ),
                 ],
               ),
             ),
@@ -894,6 +1004,21 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
       children: [
         Icon(Icons.add_a_photo_outlined, size: 36, color: kTextGrey),
         Text("Add Logo", style: TextStyle(color: kTextGrey, fontSize: 12)),
+      ],
+    );
+  }
+
+  Widget _buildDefaultBanner() {
+    return const Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.panorama_outlined, size: 40, color: kTextGrey),
+        SizedBox(height: 4),
+        Text("Tap to upload store banner",
+            style: TextStyle(color: kTextGrey, fontSize: 13)),
+        SizedBox(height: 2),
+        Text("Recommended: 1200 × 400 px",
+            style: TextStyle(color: kTextGrey, fontSize: 11)),
       ],
     );
   }
