@@ -1116,37 +1116,44 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildEssentialsGrid(List<dynamic> filteredProducts) {
-    final essentials = filteredProducts.take(4).toList();
-
-    if (essentials.isEmpty) {
+    if (filteredProducts.isEmpty) {
       return const SizedBox.shrink();
     }
 
     return GridView.builder(
-      itemCount: essentials.length,
+      itemCount: filteredProducts.length,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         crossAxisSpacing: 10,
         mainAxisSpacing: 10,
-        childAspectRatio: 0.85,
+        childAspectRatio: 0.72,
       ),
       itemBuilder: (context, index) {
-        final p = essentials[index];
+        final p = filteredProducts[index];
         final resolvedImage = (p['image_url'] as String?)?.trim() ?? '';
+        final priceValue = p['price'];
+        final unit = (p['unit_type'] ?? 'kg').toString();
+        final priceText = priceValue != null ? '₱$priceValue /$unit' : '₱0';
+        final shopOpen = _isShopOpen(p);
+        final shopLabel = p['is_db'] == true
+            ? (shopOpen
+                ? 'Open · Closes ${to12Hour(p['closing_time']?.toString() ?? '19:00')}'
+                : 'Closed · Opens ${to12Hour(p['opening_time']?.toString() ?? '05:00')}')
+            : null;
 
         return GestureDetector(
           onTap: () => _openProductDetail(p),
           child: Container(
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.grey.withValues(alpha: 0.12),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
+                  color: Colors.grey.withValues(alpha: 0.13),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
                 ),
               ],
             ),
@@ -1154,9 +1161,7 @@ class _HomePageState extends State<HomePage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 ClipRRect(
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(14),
-                  ),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
                   child: SizedBox(
                     width: double.infinity,
                     height: 110,
@@ -1180,14 +1185,64 @@ class _HomePageState extends State<HomePage> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          p['price'] != null ? '₱${p['price']}' : 'Restock now',
+                          _storeName(p, 'Market Stall'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF1A4DBE),
+                            fontSize: 11,
+                            color: Colors.grey,
                           ),
                         ),
-                        const SizedBox(height: 4),
+                        if (shopLabel != null) ...[  
+                          const SizedBox(height: 3),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: shopOpen
+                                  ? const Color(0xFF059669).withValues(alpha: 0.1)
+                                  : const Color(0xFFDC2626).withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              shopLabel,
+                              style: TextStyle(
+                                color: shopOpen ? const Color(0xFF059669) : const Color(0xFFDC2626),
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                        const Spacer(),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                priceText,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.black87,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                            InkWell(
+                              onTap: () => _addToCart(p),
+                              borderRadius: BorderRadius.circular(999),
+                              child: Container(
+                                width: 26,
+                                height: 26,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF1A4DBE),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.add, color: Colors.white, size: 16),
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
                   ),

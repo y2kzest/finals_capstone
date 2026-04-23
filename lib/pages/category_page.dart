@@ -40,12 +40,6 @@ class _CategoryPageState extends State<CategoryPage> {
       'badge': 'New',
     },
     {
-      'title': 'Services',
-      'subtitle': 'Helpful add-ons',
-      'image': 'assets/img/categories/services.jpg',
-      'badge': 'Pro',
-    },
-    {
       'title': 'Apparel',
       'subtitle': 'Shirts & more',
       'image': 'assets/img/appareljpeg.jpg',

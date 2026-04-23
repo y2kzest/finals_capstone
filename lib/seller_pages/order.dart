@@ -23,13 +23,59 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
   RealtimeChannel? _orderChannel;
   RealtimeChannel? _notifChannel;
   int _unreadCount = 0;
+  bool _autoAccept = false;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 5, vsync: this);
     _fetchUnreadCount();
+    _loadAutoAcceptSetting();
     _subscribeRealtime();
+  }
+
+  Future<void> _loadAutoAcceptSetting() async {
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) return;
+    try {
+      final res = await supabase
+          .from('seller_profiles')
+          .select('auto_accept_orders')
+          .eq('seller_id', userId)
+          .maybeSingle();
+      if (mounted && res != null) {
+        setState(() => _autoAccept = res['auto_accept_orders'] == true);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveAutoAcceptSetting(bool value) async {
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) return;
+    setState(() => _autoAccept = value);
+
+    // When enabling, immediately accept all currently pending orders.
+    // This runs before the DB save so a failed DB write never blocks it.
+    if (value) {
+      final pending = await _fetchOrders('pending');
+      for (final order in pending) {
+        if (!mounted) return;
+        final orderId = order['id']?.toString();
+        if (orderId != null) {
+          await _updateStatus(orderId, 'preparing', order);
+        }
+      }
+    }
+
+    // Persist the setting (best-effort — toggle state is already applied above).
+    try {
+      await supabase
+          .from('seller_profiles')
+          .update({'auto_accept_orders': value})
+          .eq('seller_id', userId);
+    } catch (e) {
+      debugPrint('Save auto-accept error: $e');
+    }
   }
 
   void _subscribeRealtime() {
@@ -39,7 +85,31 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     _orderChannel = supabase
         .channel('seller-orders')
         .onPostgresChanges(
-          event: PostgresChangeEvent.all,
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'orders',
+          filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'seller_id', value: userId),
+          callback: (payload) {
+            if (!mounted) return;
+            setState(() {});
+            if (_autoAccept) {
+              final newRecord = payload.newRecord;
+              final orderId = newRecord['id']?.toString();
+              if (orderId != null && newRecord['status'] == 'pending') {
+                _updateStatus(orderId, 'preparing', Map<String, dynamic>.from(newRecord));
+              }
+            }
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'orders',
+          filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'seller_id', value: userId),
+          callback: (_) { if (mounted) setState(() {}); },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.delete,
           schema: 'public',
           table: 'orders',
           filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'seller_id', value: userId),
@@ -284,6 +354,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
               child: OutlinedButton.icon(
                 onPressed: () async {
                   final scanned = await _openQRScanner();
+                  if (!ctx.mounted) return;
                   if (scanned != null && scanned.isNotEmpty) {
                     Navigator.pop(ctx, scanned);
                   }
@@ -465,7 +536,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
           children: [
             // Header
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
               child: Row(
                 children: [
                   const Expanded(
@@ -473,31 +544,83 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                       style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: Color(0xFF111827)),
                     ),
                   ),
-                  if (_unreadCount > 0)
-                    GestureDetector(
-                      onTap: _markNotificationsRead,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: _kRed.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.notifications_active_rounded, size: 14, color: _kRed),
-                            const SizedBox(width: 4),
-                            Text('$_unreadCount new',
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _kRed),
-                            ),
-                          ],
+                  if (_unreadCount > 0) ...
+                    [
+                      GestureDetector(
+                        onTap: _markNotificationsRead,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: _kRed.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.notifications_active_rounded, size: 14, color: _kRed),
+                              const SizedBox(width: 4),
+                              Text('$_unreadCount new',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _kRed),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
+                      const SizedBox(width: 8),
+                    ],
                 ],
               ),
             ),
-            const SizedBox(height: 6),
+            // Auto-accept toggle
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+              child: GestureDetector(
+                onTap: () => _saveAutoAcceptSetting(!_autoAccept),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: _autoAccept ? _kGreen.withValues(alpha: 0.1) : Colors.grey.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(
+                      color: _autoAccept ? _kGreen.withValues(alpha: 0.35) : Colors.grey.withValues(alpha: 0.2),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.bolt_rounded,
+                        size: 15,
+                        color: _autoAccept ? _kGreen : const Color(0xFF9CA3AF),
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        'Auto-accept orders',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: _autoAccept ? _kGreen : const Color(0xFF6B7280),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        height: 22,
+                        child: Switch(
+                          value: _autoAccept,
+                          onChanged: _saveAutoAcceptSetting,
+                          activeThumbColor: Colors.white,
+                          activeTrackColor: _kGreen,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          thumbColor: WidgetStateProperty.all(Colors.white),
+                          trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
             // Tabs
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -609,7 +732,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                             child: Icon(_statusIcon(status), color: color, size: 24),
                           )
                         : Image.network(imgUrl, fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
+                            errorBuilder: (_, e, st) => Container(
                               color: color.withValues(alpha: 0.1),
                               child: Icon(_statusIcon(status), color: color, size: 24),
                             ),
