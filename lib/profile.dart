@@ -1,11 +1,16 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'pages/login_page.dart';
 import 'pages/orders_page.dart';
+import 'pages/addresses_page.dart';
+import 'pages/buyer_messages_page.dart';
 import 'seller_pages/dashboard_screen.dart';
 import 'seller_pages/activate.dart';
 
-const Color kDeepBlue = Color(0xFF1E3A8A);
+const Color kDeepBlue = Color(0xFF153075);
 
 class Profile extends StatefulWidget {
   const Profile({super.key});
@@ -21,9 +26,11 @@ class _ProfileState extends State<Profile> {
   Map<String, dynamic>? _profileData;
   String _userEmail = '';
   bool _isLoading = true;
+  bool _isUploadingAvatar = false;
   String _sellerStatus = ''; // '', 'pending', 'approved', 'rejected'
   bool _isSeller = false;
   int _orderCount = 0;
+  int _activeOrderCount = 0; // orders with status pending/accepted/ready
 
   @override
   void initState() {
@@ -79,6 +86,16 @@ class _ProfileState extends State<Profile> {
           .select('id')
           .eq('buyer_id', user.id);
       if (mounted) setState(() => _orderCount = (orderRes as List).length);
+    } catch (_) {}
+
+    // Fetch active orders (pending/accepted/ready) for badge
+    try {
+      final activeRes = await supabase
+          .from('orders')
+          .select('id')
+          .eq('buyer_id', user.id)
+          .inFilter('status', ['pending', 'accepted', 'ready']);
+      if (mounted) setState(() => _activeOrderCount = (activeRes as List).length);
     } catch (_) {}
 
     try {
@@ -171,6 +188,74 @@ class _ProfileState extends State<Profile> {
     }
   }
 
+  // --- Avatar Upload ---
+  Future<void> _pickAndUploadAvatar() async {
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) return;
+
+    final picker = ImagePicker();
+    XFile? pickedFile;
+    try {
+      pickedFile = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 512,
+        maxHeight: 512,
+        imageQuality: 85,
+      );
+    } catch (e) {
+      _showSnackBar('Could not open image picker: $e');
+      return;
+    }
+    if (pickedFile == null) return;
+
+    Uint8List bytes;
+    try {
+      bytes = await pickedFile.readAsBytes();
+    } catch (e) {
+      _showSnackBar('Could not read image: $e');
+      return;
+    }
+
+    final ext = pickedFile.name.split('.').last.toLowerCase();
+    final uploadPath = '$userId/avatar.$ext';
+
+    if (mounted) setState(() => _isUploadingAvatar = true);
+    try {
+      await supabase.storage.from('avatars').uploadBinary(
+        uploadPath,
+        bytes,
+        fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
+      );
+
+      // Append cache-bust timestamp so the widget re-renders with the new image
+      final publicUrl =
+          '${supabase.storage.from('avatars').getPublicUrl(uploadPath)}?t=${DateTime.now().millisecondsSinceEpoch}';
+
+      await supabase
+          .from('profile')
+          .update({'avatar_url': publicUrl})
+          .eq('user_id', userId);
+
+      if (mounted) {
+        setState(() {
+          _profileData = {...?_profileData, 'avatar_url': publicUrl};
+          _isUploadingAvatar = false;
+        });
+        _showSnackBar('Profile picture updated!');
+      }
+    } on StorageException catch (e) {
+      if (mounted) {
+        setState(() => _isUploadingAvatar = false);
+        _showSnackBar('Upload failed: ${e.message}');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isUploadingAvatar = false);
+        _showSnackBar('Upload failed: $e');
+      }
+    }
+  }
+
   void _showGenderPicker(String key) {
     final selectedGender = _profileData?['gender']?.toString();
 
@@ -231,36 +316,38 @@ class _ProfileState extends State<Profile> {
       _isLoading = true;
     });
 
+    final dynamic dbValue = newValue is DateTime
+        ? newValue.toIso8601String().split('T')[0]
+        : newValue;
+
     try {
-      await supabase
-          .from('profile')
-          .update({key: newValue})
-          .eq('user_id', userId);
+      await supabase.from('profile').upsert(
+        {
+          'user_id': userId,
+          'email': _userEmail,
+          key: dbValue,
+        },
+        onConflict: 'user_id',
+      );
 
       if (mounted) {
         setState(() {
           _profileData = _profileData ?? {};
-
-          if (newValue is DateTime) {
-            _profileData?[key] = newValue.toIso8601String().split('T')[0];
-          } else {
-            _profileData?[key] = newValue;
-          }
-
+          _profileData![key] = dbValue;
           _isLoading = false;
         });
-        _showSnackBar("$key updated successfully!");
+        _showSnackBar("Profile updated!");
       }
     } on PostgrestException catch (e) {
       if (mounted) {
-        _showSnackBar("Error updating $key: ${e.message}");
+        _showSnackBar("Error updating profile: ${e.message}");
         setState(() {
           _isLoading = false;
         });
       }
     } catch (e) {
       if (mounted) {
-        _showSnackBar("An unexpected error occurred during update: $e");
+        _showSnackBar("An unexpected error occurred: $e");
         setState(() {
           _isLoading = false;
         });
@@ -397,10 +484,104 @@ class _ProfileState extends State<Profile> {
     }
   }
 
+  /// Opens a chat with the admin support account.
+  Future<void> _contactAdmin() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please log in first.')),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: CircularProgressIndicator(color: kDeepBlue),
+      ),
+    );
+
+    try {
+      String? adminId;
+      String adminName = 'Admin Support';
+      String? adminAvatar;
+
+      // Try looking up admin from user_roles table.
+      try {
+        final rolesRes = await supabase
+            .from('user_roles')
+            .select('user_id')
+            .eq('role', 'admin')
+            .limit(1);
+        if ((rolesRes as List).isNotEmpty) {
+          adminId = rolesRes.first['user_id']?.toString();
+        }
+      } catch (_) {}
+
+      // Fetch admin's profile for display name & avatar.
+      if (adminId != null) {
+        try {
+          final p = await supabase
+              .from('profile')
+              .select('name, avatar_url')
+              .eq('user_id', adminId)
+              .maybeSingle();
+          if (p != null) {
+            final n = p['name']?.toString().trim() ?? '';
+            if (n.isNotEmpty) adminName = n;
+            adminAvatar = p['avatar_url']?.toString();
+          }
+        } catch (_) {}
+      } else {
+        // Fallback: look up admin profile by known admin email.
+        try {
+          final p = await supabase
+              .from('profile')
+              .select('user_id, name, avatar_url')
+              .eq('email', 'maicasulla13@gmail.com')
+              .maybeSingle();
+          if (p != null) {
+            adminId = p['user_id']?.toString();
+            final n = p['name']?.toString().trim() ?? '';
+            if (n.isNotEmpty) adminName = n;
+            adminAvatar = p['avatar_url']?.toString();
+          }
+        } catch (_) {}
+      }
+
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+
+      if (adminId == null || adminId.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Support is currently unavailable. Try again later.'),
+          ),
+        );
+        return;
+      }
+
+      await openOrCreateConversation(
+        context,
+        sellerId: adminId,
+        sellerName: adminName,
+        sellerAvatarUrl: adminAvatar,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open support chat: $e')),
+      );
+    }
+  }
+
   Widget _buildQuickActionTile({
     required IconData icon,
     required String label,
     required VoidCallback onTap,
+    int badge = 0,
   }) {
     return InkWell(
       onTap: onTap,
@@ -421,7 +602,33 @@ class _ProfileState extends State<Profile> {
         ),
         child: Column(
           children: [
-            Icon(icon, color: kDeepBlue, size: 24),
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(icon, color: kDeepBlue, size: 24),
+                if (badge > 0)
+                  Positioned(
+                    right: -8,
+                    top: -6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFDC2626),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.white, width: 1.5),
+                      ),
+                      child: Text(
+                        badge > 99 ? '99+' : '$badge',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
             const SizedBox(height: 8),
             Text(
               label,
@@ -471,17 +678,28 @@ class _ProfileState extends State<Profile> {
                       shape: BoxShape.circle,
                       border: Border.all(color: Colors.white, width: 2.5),
                     ),
-                    child: const CircleAvatar(
-                      radius: 34,
-                      backgroundColor: Colors.white24,
-                      child: Icon(Icons.person, size: 42, color: Colors.white),
-                    ),
+                    child: Builder(builder: (_) {
+                      final avatarUrl =
+                          _profileData?['avatar_url']?.toString();
+                      return CircleAvatar(
+                        radius: 34,
+                        backgroundColor: Colors.white24,
+                        backgroundImage:
+                            avatarUrl != null && avatarUrl.isNotEmpty
+                                ? NetworkImage(avatarUrl)
+                                : null,
+                        child: avatarUrl == null || avatarUrl.isEmpty
+                            ? const Icon(Icons.person,
+                                size: 42, color: Colors.white)
+                            : null,
+                      );
+                    }),
                   ),
                   Positioned(
                     bottom: 0,
                     right: 0,
                     child: GestureDetector(
-                      onTap: () => _showSnackBar("Change profile picture TBD."),
+                      onTap: _isUploadingAvatar ? null : _pickAndUploadAvatar,
                       child: Container(
                         padding: const EdgeInsets.all(4),
                         decoration: BoxDecoration(
@@ -489,11 +707,18 @@ class _ProfileState extends State<Profile> {
                           shape: BoxShape.circle,
                           border: Border.all(color: Colors.white70),
                         ),
-                        child: const Icon(
-                          Icons.camera_alt,
-                          size: 14,
-                          color: kDeepBlue,
-                        ),
+                        child: _isUploadingAvatar
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: kDeepBlue),
+                              )
+                            : const Icon(
+                                Icons.camera_alt,
+                                size: 14,
+                                color: kDeepBlue,
+                              ),
                       ),
                     ),
                   ),
@@ -756,7 +981,7 @@ class _ProfileState extends State<Profile> {
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [Color(0xFF283A97), Color(0xFF3455EB)],
+                colors: [Color(0xFF153075), Color(0xFF2A4BA0)],
               ),
               borderRadius: BorderRadius.circular(14),
               boxShadow: const [
@@ -958,6 +1183,7 @@ class _ProfileState extends State<Profile> {
                     child: _buildQuickActionTile(
                       icon: Icons.receipt_long_rounded,
                       label: 'My Orders',
+                      badge: _activeOrderCount,
                       onTap: () {
                         Navigator.push(
                           context,
@@ -971,7 +1197,10 @@ class _ProfileState extends State<Profile> {
                     child: _buildQuickActionTile(
                       icon: Icons.location_on_outlined,
                       label: 'Addresses',
-                      onTap: () {},
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const AddressesPage()),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -987,7 +1216,7 @@ class _ProfileState extends State<Profile> {
                     child: _buildQuickActionTile(
                       icon: Icons.support_agent_rounded,
                       label: 'Help',
-                      onTap: () {},
+                      onTap: _contactAdmin,
                     ),
                   ),
                 ],

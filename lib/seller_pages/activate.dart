@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'fill_business_info.dart';
 
 // Define the primary color constant
-const Color kPrimaryColor = Color(0xFF283A97);
+const Color kPrimaryColor = Color(0xFF2A4BA0);
 
 
 class ActivateQuickcartScreen extends StatelessWidget {

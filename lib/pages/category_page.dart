@@ -45,6 +45,12 @@ class _CategoryPageState extends State<CategoryPage> {
       'image': 'assets/img/appareljpeg.jpg',
       'badge': 'New',
     },
+    {
+      'title': 'Karinderya',
+      'subtitle': 'Cooked meals & ulam',
+      'image': 'assets/img/karindirya.jpg',
+      'badge': 'Hot',
+    },
   ];
 
   @override
@@ -109,7 +115,7 @@ class _CategoryPageState extends State<CategoryPage> {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF1A4DBE), Color(0xFF2A4BA0)],
+          colors: [Color(0xFF2A4BA0), Color(0xFF153075)],
         ),
         boxShadow: const [
           BoxShadow(
@@ -267,7 +273,7 @@ class _CategoryPageState extends State<CategoryPage> {
                       children: [
                         Icon(
                           Icons.flash_on_rounded,
-                          color: Color(0xFFF5A524),
+                          color: Color(0xFFF9B023),
                           size: 18,
                         ),
                         SizedBox(width: 8),
@@ -301,7 +307,7 @@ class _CategoryPageState extends State<CategoryPage> {
                       children: [
                         Icon(
                           Icons.local_shipping_outlined,
-                          color: Color(0xFF1A4DBE),
+                          color: Color(0xFF2A4BA0),
                           size: 18,
                         ),
                         SizedBox(width: 8),
@@ -344,7 +350,7 @@ class _CategoryPageState extends State<CategoryPage> {
                   child: const Text(
                     'See all',
                     style: TextStyle(
-                      color: Color(0xFF1A4DBE),
+                      color: Color(0xFF2A4BA0),
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -505,13 +511,13 @@ class CategoryCard extends StatelessWidget {
                     width: 24,
                     height: 24,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1A4DBE).withValues(alpha: 0.12),
+                      color: const Color(0xFF2A4BA0).withValues(alpha: 0.12),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(
                       Icons.arrow_forward_rounded,
                       size: 14,
-                      color: Color(0xFF1A4DBE),
+                      color: Color(0xFF2A4BA0),
                     ),
                   ),
                 ],

@@ -1,0 +1,5 @@
+﻿id,name,public,allowed_mime_types
+avatars,avatars,true,NULL
+logos,logos,true,[image/jpeg image/jpg image/png image/gif image/webp image/bmp image/svg+xml]
+Permits,Permits,true,[image/jpeg image/jpg image/png image/gif image/webp image/bmp image/svg+xml]
+products,products,true,[image/jpeg image/jpg image/png image/gif image/webp image/bmp image/svg+xml]

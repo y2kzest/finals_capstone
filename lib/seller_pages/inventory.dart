@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'addproduct.dart';
+import 'edit_product.dart';
 
 // ── Design tokens ──────────────────────────────────────────
-const Color _kPrimary = Color(0xFF1A4DBE);
+const Color _kPrimary = Color(0xFF2A4BA0);
 const Color _kSurface = Color(0xFFF5F6FB);
 const Color _kCard = Colors.white;
 const Color _kGreen = Color(0xFF059669);
@@ -13,7 +14,8 @@ const Color _kTextPrimary = Color(0xFF111827);
 const Color _kTextSecondary = Color(0xFF6B7280);
 
 class InventoryManagementScreen extends StatefulWidget {
-  const InventoryManagementScreen({super.key});
+  final VoidCallback? onBack;
+  const InventoryManagementScreen({super.key, this.onBack});
 
   @override
   State<InventoryManagementScreen> createState() =>
@@ -45,7 +47,6 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen>
         final stock = _stockOf(p);
         return sum + (price * stock);
       });
-
   int _stockOf(Map<String, dynamic> p) {
     final s = p['stock_quantity'];
     if (s is int) return s;
@@ -492,6 +493,7 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen>
   }
 
   // ── Edit product dialog ───────────────────────────────────
+  // ignore: unused_element
   void _showEditProductDialog(Map<String, dynamic> product) {
     final nameController =
         TextEditingController(text: product['name']?.toString() ?? '');
@@ -611,7 +613,9 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen>
                 children: [
                   GestureDetector(
                     onTap: () {
-                      if (Navigator.of(context).canPop()) {
+                      if (widget.onBack != null) {
+                        widget.onBack!();
+                      } else if (Navigator.of(context).canPop()) {
                         Navigator.of(context).pop();
                       }
                     },
@@ -789,6 +793,13 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen>
           icon: Icons.point_of_sale_rounded,
           color: _kGreen,
         ),
+        const SizedBox(width: 8),
+        _SummaryTile(
+          label: 'Total Value',
+          value: '\u20b1${_totalValue.toStringAsFixed(0)}',
+          icon: Icons.monetization_on_rounded,
+          color: _kOrange,
+        ),
       ],
     );
   }
@@ -948,7 +959,15 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen>
                 icon: Icons.edit_outlined,
                 label: 'Edit',
                 color: _kOrange,
-                onTap: () => _showEditProductDialog(product),
+                onTap: () async {
+                  final updated = await Navigator.push<bool>(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => EditProductPage(product: product),
+                    ),
+                  );
+                  if (updated == true) _loadProducts();
+                },
               ),
               const Spacer(),
               GestureDetector(

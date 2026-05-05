@@ -129,7 +129,7 @@ class ProductListPage extends StatelessWidget {
                                 height: 28,
                                 width: 28,
                                 decoration: const BoxDecoration(
-                                  color: Color(0xFF1A3C8C),
+                                  color: Color(0xFF153075),
                                   shape: BoxShape.circle,
                                 ),
                                 child: const Icon(Icons.add, color: Colors.white, size: 18),

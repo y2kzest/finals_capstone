@@ -14,29 +14,119 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   List<dynamic> products = [];
   bool isLoading = true;
-  String _selectedFilter = 'All';
   String _greetingName = 'Shopper';
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
+  // Active filter chips
+  bool _filterOpenNow = false;
+  bool _filterDelivery = false;
+  String _filterCategory = ''; // empty = all
+  double _filterMaxPrice = 0;  // 0 = no cap
   List<Map<String, dynamic>> _notifications = [];
   List<Map<String, dynamic>> _banners = [];
+  String _preferredPickupWindow = 'Today, all day';
 
-  final List<String> _filters = const [
-    'All',
-    'Fish',
-    'Meat',
-    'Vegetables',
-    'Fruits',
-    'Apparel',
+  static const List<String> _pickupWindows = [
+    'Today, all day',
+    'Morning (5AM–12PM)',
+    'Afternoon (12PM–5PM)',
+    'Evening (5PM–7PM)',
+    'Tomorrow, all day',
   ];
 
   @override
   void initState() {
     super.initState();
+    _ensureProfile();
     _loadGreetingName();
+    _loadPreferredPickupWindow();
     fetchProducts();
     _fetchNotifications();
     _fetchBanners();
+  }
+
+  Future<void> _ensureProfile() async {
+    await ensureOwnProfileRow(Supabase.instance.client);
+  }
+
+  Future<void> _loadPreferredPickupWindow() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+    try {
+      final res = await Supabase.instance.client
+          .from('profile')
+          .select('preferred_pickup_window')
+          .eq('user_id', user.id)
+          .maybeSingle();
+      final val = res?['preferred_pickup_window']?.toString();
+      if (mounted && val != null && val.isNotEmpty) {
+        setState(() => _preferredPickupWindow = val);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _savePreferredPickupWindow(String window) async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+    setState(() => _preferredPickupWindow = window);
+    try {
+      await Supabase.instance.client
+          .from('profile')
+          .update({'preferred_pickup_window': window})
+          .eq('user_id', user.id);
+    } catch (_) {}
+  }
+
+  void _showPickupWindowSheet() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                    width: 36, height: 4,
+                    decoration: BoxDecoration(
+                        color: Colors.grey[300],
+                        borderRadius: BorderRadius.circular(2))),
+              ),
+              const SizedBox(height: 14),
+              const Text('Select Pickup Window',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
+              const Text('Sellers will see your preferred pickup schedule',
+                  style: TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 14),
+              ..._pickupWindows.map((w) {
+                final selected = w == _preferredPickupWindow;
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    selected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                    color: selected ? const Color(0xFF2A4BA0) : Colors.grey,
+                  ),
+                  title: Text(w,
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                          color: selected ? const Color(0xFF2A4BA0) : Colors.black87)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _savePreferredPickupWindow(w);
+                  },
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -68,7 +158,7 @@ class _HomePageState extends State<HomePage> {
     try {
       final resp = await Supabase.instance.client
           .from('seller_profiles')
-          .select('store_name, banner_url, logo_url, category, opening_time, closing_time, is_open')
+          .select('store_name, banner_url, logo_url, category, opening_time, closing_time, is_open, delivery_enabled')
           .not('banner_url', 'is', null)
           .eq('approval_status', 'approved')
           .limit(10);
@@ -86,117 +176,267 @@ class _HomePageState extends State<HomePage> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        maxChildSize: 0.85,
-        minChildSize: 0.3,
+        initialChildSize: 0.65,
+        maxChildSize: 0.92,
+        minChildSize: 0.35,
         builder: (context, scrollController) => Container(
           decoration: const BoxDecoration(
-            color: Colors.white,
+            color: Color(0xFFF8F9FC),
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: Column(
             children: [
-              const SizedBox(height: 8),
-              Container(width: 40, height: 4,
-                  decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                child: Row(
+              // ── Handle + header ──
+              Container(
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                  boxShadow: [BoxShadow(color: Color(0x0A000000), blurRadius: 6, offset: Offset(0, 2))],
+                ),
+                child: Column(
                   children: [
-                    const Text('Notifications',
-                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-                    const Spacer(),
-                    if (_notifications.any((n) => n['is_read'] != true))
-                      TextButton(
-                        onPressed: () async {
-                          final client = Supabase.instance.client;
-                          final user = client.auth.currentUser;
-                          if (user == null) return;
-                          try {
-                            await client.from('notifications')
-                                .update({'is_read': true})
-                                .eq('user_id', user.id);
-                            _fetchNotifications();
-                          } catch (_) {}
-                        },
-                        child: const Text('Mark all read',
-                            style: TextStyle(color: Color(0xFF1A4DBE), fontWeight: FontWeight.w600, fontSize: 13)),
+                    const SizedBox(height: 10),
+                    Center(
+                      child: Container(
+                        width: 40, height: 4,
+                        decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
                       ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 12, 12, 12),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.notifications_rounded, size: 22, color: Color(0xFF2A4BA0)),
+                          const SizedBox(width: 8),
+                          const Text('Notifications',
+                              style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: Color(0xFF111827))),
+                          const SizedBox(width: 8),
+                          if (_notifications.any((n) => n['is_read'] != true))
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF2A4BA0),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                '${_notifications.where((n) => n['is_read'] != true).length}',
+                                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                          const Spacer(),
+                          if (_notifications.any((n) => n['is_read'] != true))
+                            TextButton(
+                              onPressed: () async {
+                                final client = Supabase.instance.client;
+                                final user = client.auth.currentUser;
+                                if (user == null) return;
+                                try {
+                                  await client.from('notifications')
+                                      .update({'is_read': true})
+                                      .eq('user_id', user.id);
+                                  _fetchNotifications();
+                                } catch (_) {}
+                              },
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                foregroundColor: const Color(0xFF2A4BA0),
+                              ),
+                              child: const Text('Mark all read',
+                                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                            ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
+              // ── List ──
               Expanded(
                 child: _notifications.isEmpty
                     ? Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.notifications_off_outlined, size: 48, color: Colors.grey[300]),
-                            const SizedBox(height: 12),
-                            Text('No notifications yet', style: TextStyle(color: Colors.grey[500], fontSize: 15)),
+                            Icon(Icons.notifications_off_outlined, size: 52, color: Colors.grey[300]),
+                            const SizedBox(height: 14),
+                            Text('No notifications yet',
+                                style: TextStyle(color: Colors.grey[500], fontSize: 15, fontWeight: FontWeight.w600)),
+                            const SizedBox(height: 4),
+                            Text('Order updates will appear here',
+                                style: TextStyle(color: Colors.grey[400], fontSize: 13)),
                           ],
                         ),
                       )
                     : ListView.builder(
                         controller: scrollController,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                         itemCount: _notifications.length,
                         itemBuilder: (context, i) {
                           final n = _notifications[i];
                           final isRead = n['is_read'] == true;
                           final type = n['type']?.toString() ?? '';
-                          final message = n['message']?.toString() ?? 'Notification';
-                          final title = n['title']?.toString() ?? _notifTitle(type);
-                          String dateStr = '';
+                          final message = n['message']?.toString() ?? '';
+                          final title = n['title']?.toString().isNotEmpty == true
+                              ? n['title'].toString()
+                              : _notifTitle(type);
+                          final accent = _notifColor(type);
+
+                          // Date label grouping
+                          String dateLabel = '';
+                          String timeStr = '';
                           try {
                             final dt = DateTime.parse(n['created_at'].toString()).toLocal();
+                            final now = DateTime.now();
+                            final today = DateTime(now.year, now.month, now.day);
+                            final yesterday = today.subtract(const Duration(days: 1));
+                            final dtDay = DateTime(dt.year, dt.month, dt.day);
+                            if (dtDay == today) {
+                              dateLabel = 'Today';
+                            } else if (dtDay == yesterday) {
+                              dateLabel = 'Yesterday';
+                            } else {
+                              dateLabel = '${_monthName(dt.month)} ${dt.day}';
+                            }
                             final h = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
                             final amPm = dt.hour >= 12 ? 'PM' : 'AM';
-                            dateStr = '${dt.month}/${dt.day} $h:${dt.minute.toString().padLeft(2, '0')} $amPm';
+                            timeStr = '$h:${dt.minute.toString().padLeft(2, '0')} $amPm';
                           } catch (_) {}
 
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: isRead ? Colors.white : const Color(0xFFF0F4FF),
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: isRead ? const Color(0xFFF3F4F6) : const Color(0xFFD4DEFF)),
-                            ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Container(
-                                  width: 38, height: 38,
-                                  decoration: BoxDecoration(
-                                    color: _notifColor(type).withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Icon(_notifIcon(type), color: _notifColor(type), size: 20),
+                          // Show date separator when date changes
+                          final showSeparator = i == 0 ||
+                              (() {
+                                try {
+                                  final prev = DateTime.parse(
+                                      _notifications[i - 1]['created_at'].toString()).toLocal();
+                                  final curr = DateTime.parse(n['created_at'].toString()).toLocal();
+                                  return DateTime(prev.year, prev.month, prev.day) !=
+                                      DateTime(curr.year, curr.month, curr.day);
+                                } catch (_) {
+                                  return false;
+                                }
+                              })();
+
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (showSeparator && dateLabel.isNotEmpty) ...[
+                                if (i != 0) const SizedBox(height: 8),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  child: Row(children: [
+                                    Expanded(child: Divider(color: Colors.grey[300], height: 1)),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                                      child: Text(dateLabel,
+                                          style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w700,
+                                              color: Colors.grey[500],
+                                              letterSpacing: 0.4)),
+                                    ),
+                                    Expanded(child: Divider(color: Colors.grey[300], height: 1)),
+                                  ]),
                                 ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                              ],
+                              Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                decoration: BoxDecoration(
+                                  color: isRead ? Colors.white : const Color(0xFFF0F4FF),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                      color: isRead ? const Color(0xFFEEF0F5) : accent.withValues(alpha: 0.3)),
+                                  boxShadow: const [
+                                    BoxShadow(color: Color(0x08000000), blurRadius: 6, offset: Offset(0, 2)),
+                                  ],
+                                ),
+                                child: IntrinsicHeight(
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
                                     children: [
-                                      Text(title,
-                                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14,
-                                              color: isRead ? const Color(0xFF6B7280) : const Color(0xFF111827))),
-                                      const SizedBox(height: 4),
-                                      Text(message, style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280),
-                                          height: 1.3)),
-                                      if (dateStr.isNotEmpty) ...[
-                                        const SizedBox(height: 6),
-                                        Text(dateStr, style: TextStyle(fontSize: 11, color: Colors.grey[400])),
-                                      ],
+                                      // Left accent bar
+                                      Container(
+                                        width: 4,
+                                        decoration: BoxDecoration(
+                                          color: isRead ? Colors.transparent : accent,
+                                          borderRadius: const BorderRadius.only(
+                                            topLeft: Radius.circular(14),
+                                            bottomLeft: Radius.circular(14),
+                                          ),
+                                        ),
+                                      ),
+                                      Expanded(
+                                        child: Padding(
+                                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                                          child: Row(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              // Icon bubble
+                                              Container(
+                                                width: 40, height: 40,
+                                                decoration: BoxDecoration(
+                                                  color: accent.withValues(alpha: 0.12),
+                                                  borderRadius: BorderRadius.circular(12),
+                                                ),
+                                                child: Icon(_notifIcon(type), color: accent, size: 20),
+                                              ),
+                                              const SizedBox(width: 12),
+                                              // Text content
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Row(
+                                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                                      children: [
+                                                        Expanded(
+                                                          child: Text(title,
+                                                              style: TextStyle(
+                                                                fontWeight: FontWeight.w700,
+                                                                fontSize: 14,
+                                                                color: isRead
+                                                                    ? const Color(0xFF6B7280)
+                                                                    : const Color(0xFF111827),
+                                                              )),
+                                                        ),
+                                                        if (timeStr.isNotEmpty) ...[
+                                                          const SizedBox(width: 8),
+                                                          Text(timeStr,
+                                                              style: TextStyle(
+                                                                  fontSize: 11,
+                                                                  color: Colors.grey[400],
+                                                                  fontWeight: FontWeight.w500)),
+                                                        ],
+                                                        if (!isRead) ...[
+                                                          const SizedBox(width: 6),
+                                                          Container(
+                                                            width: 8, height: 8,
+                                                            margin: const EdgeInsets.only(top: 4),
+                                                            decoration: BoxDecoration(
+                                                                color: accent, shape: BoxShape.circle),
+                                                          ),
+                                                        ],
+                                                      ],
+                                                    ),
+                                                    if (message.isNotEmpty) ...[
+                                                      const SizedBox(height: 5),
+                                                      Text(message,
+                                                          style: const TextStyle(
+                                                              fontSize: 13,
+                                                              color: Color(0xFF4B5563),
+                                                              height: 1.4)),
+                                                    ],
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
                                     ],
                                   ),
                                 ),
-                                if (!isRead)
-                                  Container(width: 8, height: 8, margin: const EdgeInsets.only(top: 6),
-                                      decoration: const BoxDecoration(color: Color(0xFF1A4DBE), shape: BoxShape.circle)),
-                              ],
-                            ),
+                              ),
+                            ],
                           );
                         },
                       ),
@@ -206,6 +446,11 @@ class _HomePageState extends State<HomePage> {
         ),
       ),
     );
+  }
+
+  String _monthName(int month) {
+    const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return names[(month - 1).clamp(0, 11)];
   }
 
   String _notifTitle(String type) {
@@ -232,7 +477,7 @@ class _HomePageState extends State<HomePage> {
     switch (type) {
       case 'seller_approved': return const Color(0xFF059669);
       case 'seller_rejected': return const Color(0xFFDC2626);
-      case 'order_placed': return const Color(0xFF1A4DBE);
+      case 'order_placed': return const Color(0xFF2A4BA0);
       case 'order_ready': return const Color(0xFF8B5CF6);
       default: return const Color(0xFFF59E0B);
     }
@@ -290,10 +535,10 @@ class _HomePageState extends State<HomePage> {
     }
 
     try {
-      // Join with seller_profiles to get store name + shop hours
+      // Join with seller_profiles to get store name + shop hours + delivery flag
       final response = await Supabase.instance.client
           .from('product')
-          .select('*, seller_profiles!product_seller_id_fkey(store_name, is_open, opening_time, closing_time)')
+          .select('*, seller_profiles!product_seller_id_fkey(store_name, is_open, opening_time, closing_time, delivery_enabled)')
           .order('id', ascending: false);
 
       if (!mounted) return;
@@ -339,47 +584,21 @@ class _HomePageState extends State<HomePage> {
       }).toList();
     }
 
-    if (_selectedFilter == 'All') return results;
-
-    // Map filter labels to DB category values + keyword fallbacks
-    final categoryMap = <String, String>{
-      'Fish': 'fish',
-      'Meat': 'meat',
-      'Vegetables': 'vegetable',
-      'Fruits': 'fruit',
-      'Apparel': 'apparel',
-    };
-    final keywords = <String>{};
-    switch (_selectedFilter) {
-      case 'Fish':
-        keywords.addAll({'fish', 'tilapia', 'bangus', 'tuna', 'galunggong'});
-        break;
-      case 'Meat':
-        keywords.addAll({'beef', 'pork', 'chicken', 'liempo', 'meat', 'kasim'});
-        break;
-      case 'Vegetables':
-        keywords.addAll({'vegetable', 'tomato', 'onion', 'carrot', 'cabbage', 'mixed'});
-        break;
-      case 'Fruits':
-        keywords.addAll({'fruit', 'banana', 'apple', 'mango', 'orange', 'seasonal'});
-        break;
-      case 'Apparel':
-        keywords.addAll({'shirt', 'shoes', 'apparel', 'clothing', 'pants', 'dress'});
-        break;
+    // Filter chips
+    if (_filterOpenNow) results = results.where(_isShopOpen).toList();
+    if (_filterDelivery) results = results.where((p) => p['delivery_enabled'] == true).toList();
+    if (_filterCategory.isNotEmpty) {
+      results = results.where((p) =>
+          (p['category'] ?? '').toString().toLowerCase() == _filterCategory.toLowerCase()).toList();
+    }
+    if (_filterMaxPrice > 0) {
+      results = results.where((p) {
+        final price = double.tryParse(p['price']?.toString() ?? '') ?? 0;
+        return price <= _filterMaxPrice;
+      }).toList();
     }
 
-    final categoryValue = categoryMap[_selectedFilter]?.toLowerCase() ?? '';
-
-    final filtered = results.where((p) {
-      // Match by DB category field first (most reliable for seller products)
-      final cat = (p['category'] ?? '').toString().toLowerCase();
-      if (cat.isNotEmpty && cat.contains(categoryValue)) return true;
-      // Fallback: keyword match on product name
-      final name = (p['product_name'] ?? '').toString().toLowerCase();
-      return keywords.any(name.contains);
-    }).toList();
-
-    return filtered;
+    return results;
   }
 
   List<Map<String, dynamic>> _normalizedProducts() {
@@ -394,11 +613,13 @@ class _HomePageState extends State<HomePage> {
       String sellerOpenTime = '05:00';
       String sellerCloseTime = '19:00';
       final joined = raw['seller_profiles'];
+      bool sellerDeliveryEnabled = false;
       if (joined is Map) {
         if (joined['store_name'] != null) storeName = joined['store_name'].toString();
         sellerIsOpen = joined['is_open'] == true;
         sellerOpenTime = joined['opening_time']?.toString() ?? '05:00';
         sellerCloseTime = joined['closing_time']?.toString() ?? '19:00';
+        sellerDeliveryEnabled = joined['delivery_enabled'] == true;
       }
 
       combined.add({
@@ -417,6 +638,14 @@ class _HomePageState extends State<HomePage> {
         'seller_is_open': sellerIsOpen,
         'opening_time': sellerOpenTime,
         'closing_time': sellerCloseTime,
+        'delivery_enabled': sellerDeliveryEnabled,
+        'product_type': (raw['product_type'] ?? 'retail').toString(),
+        'pricing_basis': (raw['pricing_basis'] ?? '').toString(),
+        'prep_time': (raw['prep_time'] ?? '').toString(),
+        'variants': (raw['variants'] ?? '').toString(),
+        'daily_available': raw['daily_available'] ?? true,
+        'image_urls': raw['image_urls'],
+        'retail_price': raw['retail_price'],
       });
     }
 
@@ -453,12 +682,18 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  void _openCart() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const CartPage()),
+    );
+  }
+
   Widget _buildOpenClosedBadge(dynamic product) {
     if (product['is_db'] != true) return const SizedBox.shrink();
     final open = _isShopOpen(product);
     final openTime = (product['opening_time'] ?? '05:00').toString();
     final closeTime = (product['closing_time'] ?? '19:00').toString();
-    // Format display like Google Maps: "Closed · Opens 5:00 AM"
     String label;
     Color color;
     if (open) {
@@ -469,24 +704,38 @@ class _HomePageState extends State<HomePage> {
       label = 'Closed \u00b7 Opens ${to12Hour(openTime)}';
     }
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Text(
         label,
-        style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700),
+        style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w700),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
     );
   }
 
-  void _openCart() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const CartPage()),
+  Widget _buildDeliveryBadge(dynamic product) {
+    if (product['is_db'] != true) return const SizedBox.shrink();
+    final delivery = product['delivery_enabled'] == true;
+    if (!delivery) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2A4BA0).withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: const [
+          Icon(Icons.delivery_dining_rounded, size: 9, color: Color(0xFF2A4BA0)),
+          SizedBox(width: 3),
+          Text('Delivery', style: TextStyle(color: Color(0xFF2A4BA0), fontSize: 9, fontWeight: FontWeight.w700)),
+        ],
+      ),
     );
   }
 
@@ -569,6 +818,116 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Widget _buildFilterBar() {
+    // Collect unique categories from loaded products
+    final allNorm = _normalizedProducts();
+    final categories = allNorm
+        .map((p) => (p['category'] ?? '').toString().trim())
+        .where((c) => c.isNotEmpty)
+        .toSet()
+        .toList()..sort();
+
+    final bool anyActive = _filterOpenNow || _filterDelivery || _filterCategory.isNotEmpty || _filterMaxPrice > 0;
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          // Clear all
+          if (anyActive) ...[
+            ActionChip(
+              label: const Text('Clear'),
+              avatar: const Icon(Icons.close, size: 14),
+              backgroundColor: const Color(0xFFFFF0F0),
+              labelStyle: const TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.w700, fontSize: 12),
+              side: const BorderSide(color: Color(0xFFDC2626)),
+              onPressed: () => setState(() {
+                _filterOpenNow = false;
+                _filterDelivery = false;
+                _filterCategory = '';
+                _filterMaxPrice = 0;
+              }),
+            ),
+            const SizedBox(width: 6),
+          ],
+          // Open Now chip
+          FilterChip(
+            label: const Text('Open Now'),
+            selected: _filterOpenNow,
+            onSelected: (v) => setState(() => _filterOpenNow = v),
+            avatar: const Icon(Icons.circle, size: 10, color: Color(0xFF059669)),
+            selectedColor: const Color(0xFF059669).withValues(alpha: 0.15),
+            checkmarkColor: const Color(0xFF059669),
+            labelStyle: TextStyle(
+              color: _filterOpenNow ? const Color(0xFF059669) : const Color(0xFF374151),
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+            ),
+            side: BorderSide(color: _filterOpenNow ? const Color(0xFF059669) : Colors.grey.shade300),
+          ),
+          const SizedBox(width: 6),
+          // Delivery chip
+          FilterChip(
+            label: const Text('Delivery'),
+            selected: _filterDelivery,
+            onSelected: (v) => setState(() => _filterDelivery = v),
+            avatar: const Icon(Icons.delivery_dining_rounded, size: 14, color: Color(0xFF2A4BA0)),
+            selectedColor: const Color(0xFF2A4BA0).withValues(alpha: 0.12),
+            checkmarkColor: const Color(0xFF2A4BA0),
+            labelStyle: TextStyle(
+              color: _filterDelivery ? const Color(0xFF2A4BA0) : const Color(0xFF374151),
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+            ),
+            side: BorderSide(color: _filterDelivery ? const Color(0xFF2A4BA0) : Colors.grey.shade300),
+          ),
+          const SizedBox(width: 6),
+          // Budget chips
+          ...([100.0, 250.0, 500.0].map((cap) {
+            final selected = _filterMaxPrice == cap;
+            return Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: FilterChip(
+                label: Text('Under ₱${cap.toInt()}'),
+                selected: selected,
+                onSelected: (v) => setState(() => _filterMaxPrice = v ? cap : 0),
+                selectedColor: const Color(0xFFF9B023).withValues(alpha: 0.2),
+                checkmarkColor: const Color(0xFF92620A),
+                labelStyle: TextStyle(
+                  color: selected ? const Color(0xFF92620A) : const Color(0xFF374151),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                ),
+                side: BorderSide(color: selected ? const Color(0xFFF9B023) : Colors.grey.shade300),
+              ),
+            );
+          })),
+          // Category chips
+          ...categories.map((cat) {
+            final selected = _filterCategory == cat;
+            return Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: FilterChip(
+                label: Text(cat),
+                selected: selected,
+                onSelected: (v) => setState(() => _filterCategory = v ? cat : ''),
+                selectedColor: const Color(0xFF153075).withValues(alpha: 0.12),
+                checkmarkColor: const Color(0xFF153075),
+                labelStyle: TextStyle(
+                  color: selected ? const Color(0xFF153075) : const Color(0xFF374151),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                ),
+                side: BorderSide(color: selected ? const Color(0xFF153075) : Colors.grey.shade300),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTopHeader() {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
@@ -577,7 +936,7 @@ class _HomePageState extends State<HomePage> {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF1A4DBE), Color(0xFF2A4BA0)],
+          colors: [Color(0xFF2A4BA0), Color(0xFF153075)],
         ),
         boxShadow: const [
           BoxShadow(
@@ -693,10 +1052,13 @@ class _HomePageState extends State<HomePage> {
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: _buildInfoPill(
-                  label: 'WITHIN',
-                  value: 'Today 5AM-7PM',
-                  icon: Icons.schedule_outlined,
+                child: GestureDetector(
+                  onTap: _showPickupWindowSheet,
+                  child: _buildInfoPill(
+                    label: 'WITHIN',
+                    value: _preferredPickupWindow,
+                    icon: Icons.schedule_outlined,
+                  ),
                 ),
               ),
             ],
@@ -719,6 +1081,7 @@ class _HomePageState extends State<HomePage> {
                       final isOpen = banner['is_open'] == true;
                       final openTime = banner['opening_time']?.toString() ?? '05:00';
                       final closeTime = banner['closing_time']?.toString() ?? '19:00';
+                      final deliveryEnabled = banner['delivery_enabled'] == true;
                       // Determine if currently within operating hours
                       bool isWithinHours = false;
                       try {
@@ -735,7 +1098,7 @@ class _HomePageState extends State<HomePage> {
                         margin: const EdgeInsets.only(right: 4),
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(14),
-                          color: const Color(0xFF1A4DBE),
+                          color: const Color(0xFF2A4BA0),
                         ),
                         clipBehavior: Clip.antiAlias,
                         child: Stack(
@@ -848,6 +1211,24 @@ class _HomePageState extends State<HomePage> {
                                               '${to12Hour(openTime)} \u2013 ${to12Hour(closeTime)}',
                                               style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.w500),
                                             ),
+                                            if (deliveryEnabled) ...[
+                                              const SizedBox(width: 6),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white24,
+                                                  borderRadius: BorderRadius.circular(6),
+                                                ),
+                                                child: const Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    Icon(Icons.delivery_dining_rounded, size: 11, color: Colors.white),
+                                                    SizedBox(width: 4),
+                                                    Text('Delivery', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700)),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
                                           ],
                                         ),
                                       ],
@@ -970,48 +1351,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildCategoryFilters() {
-    return SizedBox(
-      height: 42,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: _filters.length,
-        separatorBuilder: (context, index) => const SizedBox(width: 8),
-        itemBuilder: (context, index) {
-          final filter = _filters[index];
-          final isActive = filter == _selectedFilter;
-
-          return InkWell(
-            borderRadius: BorderRadius.circular(999),
-            onTap: () {
-              setState(() => _selectedFilter = filter);
-            },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(999),
-                color: isActive ? const Color(0xFF1A4DBE) : Colors.white,
-                border: Border.all(
-                  color: isActive
-                      ? const Color(0xFF1A4DBE)
-                      : Colors.grey.shade300,
-                ),
-              ),
-              child: Text(
-                filter,
-                style: TextStyle(
-                  color: isActive ? Colors.white : Colors.black87,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
   Widget _buildSectionHeader(String title, String subtitle) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
@@ -1041,7 +1380,7 @@ class _HomePageState extends State<HomePage> {
           child: const Text(
             'See all',
             style: TextStyle(
-              color: Color(0xFF1A4DBE),
+              color: Color(0xFF2A4BA0),
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -1103,10 +1442,13 @@ class _HomePageState extends State<HomePage> {
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFF1A4DBE),
+                    color: Color(0xFF2A4BA0),
                   ),
                 ),
                 const SizedBox(height: 3),
+                _buildOpenClosedBadge(product),
+                const SizedBox(height: 2),
+                _buildDeliveryBadge(product),
               ],
             ),
           ),
@@ -1136,12 +1478,6 @@ class _HomePageState extends State<HomePage> {
         final priceValue = p['price'];
         final unit = (p['unit_type'] ?? 'kg').toString();
         final priceText = priceValue != null ? '₱$priceValue /$unit' : '₱0';
-        final shopOpen = _isShopOpen(p);
-        final shopLabel = p['is_db'] == true
-            ? (shopOpen
-                ? 'Open · Closes ${to12Hour(p['closing_time']?.toString() ?? '19:00')}'
-                : 'Closed · Opens ${to12Hour(p['opening_time']?.toString() ?? '05:00')}')
-            : null;
 
         return GestureDetector(
           onTap: () => _openProductDetail(p),
@@ -1193,28 +1529,10 @@ class _HomePageState extends State<HomePage> {
                             color: Colors.grey,
                           ),
                         ),
-                        if (shopLabel != null) ...[  
-                          const SizedBox(height: 3),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: shopOpen
-                                  ? const Color(0xFF059669).withValues(alpha: 0.1)
-                                  : const Color(0xFFDC2626).withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              shopLabel,
-                              style: TextStyle(
-                                color: shopOpen ? const Color(0xFF059669) : const Color(0xFFDC2626),
-                                fontSize: 9,
-                                fontWeight: FontWeight.w700,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
+                        const SizedBox(height: 3),
+                        _buildOpenClosedBadge(p),
+                        const SizedBox(height: 2),
+                        _buildDeliveryBadge(p),
                         const Spacer(),
                         Row(
                           children: [
@@ -1235,7 +1553,7 @@ class _HomePageState extends State<HomePage> {
                                 width: 26,
                                 height: 26,
                                 decoration: const BoxDecoration(
-                                  color: Color(0xFF1A4DBE),
+                                  color: Color(0xFF2A4BA0),
                                   shape: BoxShape.circle,
                                 ),
                                 child: const Icon(Icons.add, color: Colors.white, size: 16),
@@ -1306,15 +1624,15 @@ class _HomePageState extends State<HomePage> {
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: fetchProducts,
-          color: const Color(0xFF1A4DBE),
+          color: const Color(0xFF2A4BA0),
           child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 22),
             children: [
               _buildTopHeader(),
-              const SizedBox(height: 14),
-              _buildCategoryFilters(),
-              const SizedBox(height: 16),
+              const SizedBox(height: 10),
+              _buildFilterBar(),
+              const SizedBox(height: 4),
               if (!hasResults && !isLoading)
                 Container(
                   padding: const EdgeInsets.symmetric(vertical: 60),
@@ -1335,7 +1653,6 @@ class _HomePageState extends State<HomePage> {
                           _searchController.clear();
                           setState(() {
                             _searchQuery = '';
-                            _selectedFilter = 'All';
                           });
                         },
                         child: const Text('Clear filters'),
@@ -1570,7 +1887,7 @@ class ProductCard extends StatelessWidget {
                   width: 28,
                   height: 28,
                   decoration: const BoxDecoration(
-                    color: Color(0xFF1A4DBE),
+                    color: Color(0xFF2A4BA0),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.add, color: Colors.white, size: 18),

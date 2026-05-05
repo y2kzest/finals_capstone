@@ -6,7 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // Defined constants for consistent design
-const Color kPrimaryBlue = Color(0xFF3455EB);
+const Color kPrimaryBlue = Color(0xFF2A4BA0);
 const Color kInactiveGrey = Color(0xFFE0E0E0);
 const Color kTextGrey = Color(0xFF757575);
 const int kTotalSteps = 3;
@@ -24,6 +24,8 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
   final TextEditingController _storeNameController = TextEditingController(
     text: '',
   );
+  final TextEditingController _stallNumberController = TextEditingController();
+  final TextEditingController _marketSectionController = TextEditingController();
   int _permitCount = 0;
   bool _hasBankAccount = false;
   String? _logoUrl;
@@ -46,6 +48,8 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
   @override
   void dispose() {
     _storeNameController.dispose();
+    _stallNumberController.dispose();
+    _marketSectionController.dispose();
     super.dispose();
   }
 
@@ -308,6 +312,8 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
         'full_name': fullName,
         'store_name': _storeNameController.text,
         'category': _selectedBusinessCategory,
+        'stall_number': _stallNumberController.text.trim().isEmpty ? null : _stallNumberController.text.trim(),
+        'market_section': _marketSectionController.text.trim().isEmpty ? null : _marketSectionController.text.trim(),
         'has_bank_account': _hasBankAccount,
         'permit_count': _permitCount,
         'permit_urls': _permitUrls,
@@ -775,10 +781,6 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
                       child: Text('Retail Store'),
                     ),
                     DropdownMenuItem(
-                      value: 'Service Provider',
-                      child: Text('Service Provider'),
-                    ),
-                    DropdownMenuItem(
                       value: 'Food & Beverage',
                       child: Text('Food & Beverage'),
                     ),
@@ -807,7 +809,28 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
               icon: Icons.storefront_outlined,
             ),
 
-            // 4. Progress indicator box
+            // Stall number & market section
+            Row(
+              children: [
+                Expanded(
+                  child: _buildInputField(
+                    label: "Stall Number",
+                    controller: _stallNumberController,
+                    hint: "e.g. A-12",
+                    icon: Icons.tag_rounded,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildInputField(
+                    label: "Market Section",
+                    controller: _marketSectionController,
+                    hint: "e.g. Wet Market, Dry Goods",
+                    icon: Icons.grid_view_rounded,
+                  ),
+                ),
+              ],
+            ),
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(

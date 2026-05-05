@@ -117,7 +117,7 @@ class HomeOnePage  extends StatelessWidget {
               height: 50,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF007AFF),
+                  backgroundColor: const Color(0xFF2A4BA0),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -163,7 +163,7 @@ onPressed: () {
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFF007AFF),
+                    color: Color(0xFF2A4BA0),
                   ),
                 ),
               ),

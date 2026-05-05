@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-const Color _kPrimary = Color(0xFF1A4DBE);
+const Color _kPrimary = Color(0xFF2A4BA0);
 const Color _kSurface = Color(0xFFF5F6FB);
 const Color _kGreen = Color(0xFF059669);
 const Color _kRed = Color(0xFFDC2626);
@@ -41,7 +41,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
       final res = await supabase
           .from('seller_profiles')
           .select('auto_accept_orders')
-          .eq('seller_id', userId)
+          .eq('user_id', userId)
           .maybeSingle();
       if (mounted && res != null) {
         setState(() => _autoAccept = res['auto_accept_orders'] == true);
@@ -72,7 +72,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
       await supabase
           .from('seller_profiles')
           .update({'auto_accept_orders': value})
-          .eq('seller_id', userId);
+          .eq('user_id', userId);
     } catch (e) {
       debugPrint('Save auto-accept error: $e');
     }
@@ -191,6 +191,28 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
         'status': newStatus,
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', orderId);
+
+      // Decrement stock when order is completed
+      if (newStatus == 'completed' && order != null) {
+        final productId = order['product_id']?.toString();
+        final qty = order['qty'];
+        final qtyNum = qty is num ? qty.toInt() : (int.tryParse(qty?.toString() ?? '') ?? 1);
+        if (productId != null && productId.isNotEmpty) {
+          try {
+            final prod = await supabase
+                .from('product')
+                .select('stock_quantity')
+                .eq('id', productId)
+                .maybeSingle();
+            final currentStock = (prod?['stock_quantity'] as num?)?.toInt() ?? 0;
+            final newStock = (currentStock - qtyNum).clamp(0, 999999);
+            await supabase
+                .from('product')
+                .update({'stock_quantity': newStock})
+                .eq('id', productId);
+          } catch (_) {}
+        }
+      }
 
       // Notify buyer of status change
       if (order != null) {
@@ -707,6 +729,10 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     final shortId = orderId.length > 8 ? orderId.substring(0, 8) : orderId;
     final imgUrl = o['image_url']?.toString().trim() ?? '';
     final declinedReason = o['declined_reason']?.toString();
+    final orderType = o['order_type']?.toString() ?? 'pickup';
+    final deliveryAddress = o['delivery_address']?.toString() ?? '';
+    final isDelivery = orderType == 'delivery';
+    final pickupTime = o['pickup_time']?.toString() ?? '';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -781,9 +807,88 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                 Text(_formatDate(o['created_at']?.toString()),
                   style: TextStyle(fontSize: 12, color: Colors.grey[500]),
                 ),
+                const SizedBox(width: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: isDelivery
+                        ? const Color(0xFF0891B2).withValues(alpha: 0.1)
+                        : const Color(0xFF059669).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isDelivery ? Icons.delivery_dining_rounded : Icons.storefront_rounded,
+                        size: 11,
+                        color: isDelivery ? const Color(0xFF0891B2) : const Color(0xFF059669),
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        isDelivery ? 'Delivery' : 'Pickup',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: isDelivery ? const Color(0xFF0891B2) : const Color(0xFF059669),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
+          if (isDelivery && deliveryAddress.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0891B2).withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF0891B2).withValues(alpha: 0.2)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.location_on_rounded, size: 14, color: Color(0xFF0891B2)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        deliveryAddress,
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF374151), height: 1.4),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (!isDelivery && pickupTime.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF059669).withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF059669).withValues(alpha: 0.2)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.schedule_rounded, size: 14, color: Color(0xFF059669)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Pickup: $pickupTime',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF374151), height: 1.4),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           if (status == 'declined' && declinedReason != null && declinedReason.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -807,6 +912,38 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                 ),
               ),
             ),
+          // Buyer notes / substitution
+          Builder(builder: (_) {
+            final notes = o['buyer_notes']?.toString() ?? '';
+            final allowSub = o['allow_substitution'] == true;
+            final reqWeight = o['requested_weight'];
+            if (notes.isEmpty && !allowSub && reqWeight == null) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF8EC),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.35)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(children: [
+                      Icon(Icons.notes_rounded, size: 13, color: Color(0xFFF59E0B)),
+                      SizedBox(width: 5),
+                      Text('Buyer Instructions', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFB45309))),
+                    ]),
+                    if (notes.isNotEmpty) ...[const SizedBox(height: 4), Text(notes, style: const TextStyle(fontSize: 12, color: Color(0xFF374151)))],
+                    if (allowSub) ...[const SizedBox(height: 4), const Row(children: [Icon(Icons.swap_horiz_rounded, size: 12, color: Color(0xFFF59E0B)), SizedBox(width: 4), Text('Substitution allowed', style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)))])],
+                    if (reqWeight != null) ...[const SizedBox(height: 4), Text('Requested weight: ${reqWeight}kg', style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)))],
+                  ],
+                ),
+              ),
+            );
+          }),
           // Action buttons
           if (status == 'pending') ...[
             const Divider(height: 1, indent: 16, endIndent: 16),

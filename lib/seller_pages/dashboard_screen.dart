@@ -6,10 +6,12 @@ import 'addproduct.dart';
 import 'inventory.dart';
 import 'order.dart';
 import 'analytics.dart';
+import 'seller_messages_page.dart';
+import '../pages/seller_profile_page.dart';
 
 // ── Design tokens ──────────────────────────────────────────
-const Color kPrimary = Color(0xFF1A4DBE);
-const Color kPrimaryDark = Color(0xFF2A4BA0);
+const Color kPrimary = Color(0xFF2A4BA0);
+const Color kPrimaryDark = Color(0xFF153075);
 const Color kSurface = Color(0xFFF8F9FC);
 const Color kCard = Colors.white;
 const Color kTextPrimary = Color(0xFF111827);
@@ -37,6 +39,7 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
   int _selectedIndex = 0;
   List<Map<String, dynamic>> _recentOrders = [];
   bool _isShopOpen = false;
+  bool _deliveryEnabled = false;
   String _openingTime = '05:00';
   String _closingTime = '19:00';
 
@@ -112,7 +115,7 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
     try {
       final response = await supabase
           .from('seller_profiles')
-          .select('full_name, store_name, logo_url, is_open, opening_time, closing_time')
+          .select('full_name, store_name, logo_url, is_open, opening_time, closing_time, delivery_enabled')
           .eq('user_id', userId)
           .maybeSingle();
 
@@ -124,6 +127,7 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
           _isShopOpen = response['is_open'] == true;
           _openingTime = response['opening_time']?.toString() ?? '05:00';
           _closingTime = response['closing_time']?.toString() ?? '19:00';
+          _deliveryEnabled = response['delivery_enabled'] == true;
         });
       }
 
@@ -215,6 +219,22 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
     }
   }
 
+  Future<void> _toggleDelivery(bool value) async {
+    final supabase = Supabase.instance.client;
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) return;
+    setState(() => _deliveryEnabled = value);
+    try {
+      await supabase
+          .from('seller_profiles')
+          .update({'delivery_enabled': value})
+          .eq('user_id', userId);
+    } catch (e) {
+      debugPrint('Toggle delivery error: $e');
+      if (mounted) setState(() => _deliveryEnabled = !value);
+    }
+  }
+
   void _goToTab(int idx) => setState(() => _selectedIndex = idx);
 
   // ── Build ─────────────────────────────────────────────────
@@ -227,7 +247,7 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
         children: [
           _buildHomeTab(),
           const OrdersPage(),
-          const InventoryManagementScreen(),
+          InventoryManagementScreen(onBack: () => _goToTab(0)),
           const AnalyticsReportScreen(),
         ],
       ),
@@ -263,6 +283,10 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
 
             // ── Shop Open/Closed toggle ──
             _buildShopStatusToggle(),
+            const SizedBox(height: 10),
+
+            // ── Delivery toggle ──
+            _buildDeliveryToggle(),
             const SizedBox(height: 16),
 
             // ── Approval banner ──
@@ -395,7 +419,7 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF1A4DBE), Color(0xFF2A4BA0)],
+          colors: [Color(0xFF2A4BA0), Color(0xFF153075)],
         ),
         boxShadow: [
           BoxShadow(
@@ -523,7 +547,72 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
           Switch.adaptive(
             value: _isShopOpen,
             onChanged: _toggleShopOpen,
-            activeColor: const Color(0xFF059669),
+            activeTrackColor: const Color(0xFF059669),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDeliveryToggle() {
+    const deliveryColor = Color(0xFF0891B2);
+    const offColor = Color(0xFF6B7280);
+    final activeColor = _deliveryEnabled ? deliveryColor : offColor;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: kCard,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: activeColor.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              Icons.delivery_dining_rounded,
+              color: activeColor,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _deliveryEnabled ? 'Delivery Available' : 'Delivery Unavailable',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                    color: activeColor,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _deliveryEnabled
+                      ? 'Buyers can request door-to-door delivery'
+                      : 'Buyers can only pick up orders at your store',
+                  style: const TextStyle(fontSize: 12, color: kTextSecondary),
+                ),
+              ],
+            ),
+          ),
+          Switch.adaptive(
+            value: _deliveryEnabled,
+            onChanged: _toggleDelivery,
+            activeTrackColor: deliveryColor,
           ),
         ],
       ),
@@ -571,13 +660,14 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
       _QuickAction(
           icon: Icons.add_box_rounded,
           label: 'Add Product',
-          color: const Color(0xFF1A4DBE),
+          color: const Color(0xFF2A4BA0),
           onTap: () => Navigator.push(context,
               MaterialPageRoute(builder: (_) => const AddProductPage()))),
       _QuickAction(
           icon: Icons.receipt_long_rounded,
           label: 'Orders',
           color: const Color(0xFFF59E0B),
+          badge: _pendingOrderCount,
           onTap: () => _goToTab(1)),
       _QuickAction(
           icon: Icons.bar_chart_rounded,
@@ -589,51 +679,118 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
           label: 'Inventory',
           color: const Color(0xFF8B5CF6),
           onTap: () => _goToTab(2)),
+      _QuickAction(
+          icon: Icons.storefront_rounded,
+          label: 'My Store',
+          color: const Color(0xFF0891B2),
+          onTap: () async {
+            final userId =
+                Supabase.instance.client.auth.currentUser?.id;
+            if (userId == null) return;
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => SellerProfilePage(
+                  sellerId: userId,
+                  initialStoreName: _storeName,
+                ),
+              ),
+            );
+            _fetchSellerData();
+          }),
+      _QuickAction(
+          icon: Icons.chat_bubble_outline_rounded,
+          label: 'Messages',
+          color: const Color(0xFF7C3AED),
+          onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => const SellerMessagesPage()))),
     ];
 
     return GridView.count(
-      crossAxisCount: 4,
+      crossAxisCount: 2,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 12,
-      crossAxisSpacing: 12,
-      childAspectRatio: 0.88,
+      mainAxisSpacing: 10,
+      crossAxisSpacing: 10,
+      childAspectRatio: 3.2,
       children: actions.map((a) {
         return GestureDetector(
           onTap: a.onTap,
-          child: Container(
-            decoration: BoxDecoration(
-              color: kCard,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.04),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: a.color.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(14),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: kCard,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: a.color.withValues(alpha: 0.18),
+                    width: 1.2,
                   ),
-                  child: Icon(a.icon, color: a.color, size: 22),
+                  boxShadow: [
+                    BoxShadow(
+                      color: a.color.withValues(alpha: 0.07),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 8),
-                Text(a.label,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                        color: kTextPrimary)),
-              ],
-            ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: a.color.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(a.icon, color: a.color, size: 20),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        a.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: kTextPrimary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Notification badge
+              if (a.badge != null && a.badge! > 0)
+                Positioned(
+                  top: -4,
+                  right: -4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFDC2626),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.white, width: 1.5),
+                    ),
+                    constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+                    child: Text(
+                      a.badge! > 99 ? '99+' : '${a.badge}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        height: 1.0,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
           ),
         );
       }).toList(),
@@ -1002,9 +1159,11 @@ class _QuickAction {
   final String label;
   final Color color;
   final VoidCallback onTap;
+  final int? badge;
   const _QuickAction(
       {required this.icon,
       required this.label,
       required this.color,
-      required this.onTap});
+      required this.onTap,
+      this.badge});
 }

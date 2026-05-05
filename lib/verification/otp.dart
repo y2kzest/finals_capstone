@@ -23,8 +23,8 @@ class _OtpVerificationPageState extends State<OtpVerificationPage> {
   final TextEditingController _otpController = TextEditingController();
   bool _isLoading = false;
 
-  static const Color kPrimaryBlue = Color(0xFF1E88E5);
-  static const Color kButtonBlue = Color(0xFF334D8C);
+  static const Color kPrimaryBlue = Color(0xFF2A4BA0);
+  static const Color kButtonBlue = Color(0xFF153075);
 
   @override
   void dispose() {

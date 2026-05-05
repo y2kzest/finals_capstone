@@ -43,7 +43,7 @@ class MyApp extends StatelessWidget {
         useMaterial3: true,
         fontFamily: 'Inter',
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1A4DBE),
+          seedColor: const Color(0xFF2A4BA0),
           brightness: Brightness.light,
         ),
         scaffoldBackgroundColor: const Color(0xFFF3F6FC),

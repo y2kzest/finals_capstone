@@ -15,10 +15,10 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
   List<Map<String, dynamic>> _orders = [];
   bool _isLoading = true;
 
-  static const Color _kPrimary = Color(0xFF1A4DBE);
+  static const Color _kPrimary = Color(0xFF2A4BA0);
   static const Color _kSurface = Color(0xFFF5F6FB);
 
-  final _tabs = const ['All', 'Pending', 'Accepted', 'Ready', 'Completed', 'Declined'];
+  final _tabs = const ['All', 'Pending', 'Accepted', 'Ready', 'Completed', 'Declined', 'Cancelled'];
 
   @override
   void initState() {
@@ -33,6 +33,67 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     super.dispose();
   }
 
+  Future<void> _cancelOrder(Map<String, dynamic> order) async {
+    final orderId = order['id']?.toString();
+    if (orderId == null) return;
+    final reasonCtrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Cancel Order?', style: TextStyle(fontWeight: FontWeight.w700)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Please provide a reason (optional):',
+                style: TextStyle(fontSize: 13, color: Color(0xFF6B7280))),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonCtrl,
+              maxLines: 2,
+              decoration: InputDecoration(
+                hintText: 'e.g. Changed my mind, ordered by mistake...',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                contentPadding: const EdgeInsets.all(12),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep Order')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('Cancel Order'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) { reasonCtrl.dispose(); return; }
+    try {
+      await supabase.from('orders').update({
+        'status': 'cancelled',
+        'cancelled_by': 'buyer',
+        'cancel_reason': reasonCtrl.text.trim().isEmpty ? null : reasonCtrl.text.trim(),
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', orderId);
+      if (mounted) {
+        setState(() => _isLoading = true);
+        _fetchOrders();
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Order cancelled.')));
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+    reasonCtrl.dispose();
+  }
+
   Future<void> _fetchOrders() async {
     final user = supabase.auth.currentUser;
     if (user == null) {
@@ -45,9 +106,42 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
           .select()
           .eq('buyer_id', user.id)
           .order('created_at', ascending: false);
+      final orders = List<Map<String, dynamic>>.from(res);
+
+      // Batch-fetch seller profiles to get addresses for orders that don't have them stored
+      final sellerIds = orders
+          .map((o) => o['seller_id']?.toString())
+          .whereType<String>()
+          .toSet()
+          .toList();
+      final Map<String, Map<String, String?>> sellerInfo = {};
+      if (sellerIds.isNotEmpty) {
+        try {
+          final profiles = await supabase
+              .from('seller_profiles')
+              .select('user_id, store_address')
+              .inFilter('user_id', sellerIds);
+          for (final p in profiles as List) {
+            sellerInfo[p['user_id'].toString()] = {
+              'store_address': p['store_address']?.toString(),
+            };
+          }
+        } catch (_) {}
+      }
+
+      // Merge: prefer value stored on the order; fall back to live seller profile
+      for (final o in orders) {
+        final sid = o['seller_id']?.toString();
+        final info = sid != null ? sellerInfo[sid] : null;
+        if ((o['store_address'] == null || o['store_address'].toString().isEmpty) &&
+            info?['store_address'] != null) {
+          o['store_address'] = info!['store_address'];
+        }
+      }
+
       if (!mounted) return;
       setState(() {
-        _orders = List<Map<String, dynamic>>.from(res);
+        _orders = orders;
         _isLoading = false;
       });
     } catch (e) {
@@ -61,6 +155,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     if (tab == 'Accepted') {
       return _orders.where((o) => o['status'] == 'preparing' || o['status'] == 'accepted').toList();
     }
+    if (tab == 'Cancelled') return _orders.where((o) => o['status'] == 'cancelled').toList();
     return _orders.where((o) => o['status'] == tab.toLowerCase()).toList();
   }
 
@@ -71,6 +166,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
       case 'ready': return const Color(0xFF059669);
       case 'completed': return const Color(0xFF8B5CF6);
       case 'declined': return const Color(0xFFDC2626);
+      case 'cancelled': return const Color(0xFF9CA3AF);
       default: return Colors.grey;
     }
   }
@@ -82,6 +178,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
       case 'ready': return Icons.check_circle_outline_rounded;
       case 'completed': return Icons.done_all_rounded;
       case 'declined': return Icons.cancel_rounded;
+      case 'cancelled': return Icons.block_rounded;
       default: return Icons.receipt_long_rounded;
     }
   }
@@ -93,6 +190,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
       case 'ready': return 'Ready for pickup';
       case 'completed': return 'Completed';
       case 'declined': return 'Declined by seller';
+      case 'cancelled': return 'Cancelled by you';
       default: return status;
     }
   }
@@ -164,7 +262,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                   size: 180,
                   eyeStyle: const QrEyeStyle(
                     eyeShape: QrEyeShape.square,
-                    color: Color(0xFF1A4DBE),
+                    color: Color(0xFF2A4BA0),
                   ),
                   dataModuleStyle: const QrDataModuleStyle(
                     dataModuleShape: QrDataModuleShape.square,
@@ -182,14 +280,14 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.key_rounded, size: 16, color: Color(0xFF1A4DBE)),
+                    const Icon(Icons.key_rounded, size: 16, color: Color(0xFF2A4BA0)),
                     const SizedBox(width: 8),
                     Text(pickupCode,
                       style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w900,
                         letterSpacing: 4,
-                        color: Color(0xFF1A4DBE),
+                        color: Color(0xFF2A4BA0),
                       ),
                     ),
                   ],
@@ -305,6 +403,12 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     final color = _statusColor(status);
     final productName = order['product_name']?.toString() ?? 'Order';
     final storeName = order['store_name']?.toString() ?? 'Market Stall';
+    final storeAddress = order['store_address']?.toString() ?? '';
+    final addressLine = storeAddress;
+    final orderType = order['order_type']?.toString() ?? 'pickup';
+    final deliveryAddress = order['delivery_address']?.toString() ?? '';
+    final isDelivery = orderType == 'delivery';
+    final pickupTime = order['pickup_time']?.toString() ?? '';
     final price = order['price'] ?? 0;
     final qty = order['qty'] ?? 1;
     final priceNum = price is num ? price.toDouble() : (double.tryParse(price.toString()) ?? 0);
@@ -370,6 +474,86 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                           ),
                         ],
                       ),
+                      if (addressLine.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Row(
+                          children: [
+                            const Icon(Icons.location_on_outlined, size: 12, color: Color(0xFF9CA3AF)),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(addressLine,
+                                style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+                                maxLines: 1, overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                      const SizedBox(height: 5),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: isDelivery
+                                  ? const Color(0xFF0891B2).withValues(alpha: 0.1)
+                                  : const Color(0xFF059669).withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  isDelivery ? Icons.delivery_dining_rounded : Icons.storefront_rounded,
+                                  size: 11,
+                                  color: isDelivery ? const Color(0xFF0891B2) : const Color(0xFF059669),
+                                ),
+                                const SizedBox(width: 3),
+                                Text(
+                                  isDelivery ? 'Delivery' : 'Pickup',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    color: isDelivery ? const Color(0xFF0891B2) : const Color(0xFF059669),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (isDelivery && deliveryAddress.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(Icons.location_on_rounded, size: 12, color: Color(0xFF0891B2)),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                deliveryAddress,
+                                style: const TextStyle(fontSize: 12, color: Color(0xFF374151)),
+                                maxLines: 2, overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                      if (!isDelivery && pickupTime.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(Icons.schedule_rounded, size: 12, color: Color(0xFF059669)),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                'Pickup: $pickupTime',
+                                style: const TextStyle(fontSize: 12, color: Color(0xFF374151)),
+                                maxLines: 1, overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -436,6 +620,27 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                     backgroundColor: const Color(0xFF059669),
                     foregroundColor: Colors.white,
                     elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+            ),
+          ],
+          // Cancel button for pending orders
+          if (status == 'pending') ...[
+            const Divider(height: 1, indent: 14, endIndent: 14),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+              child: SizedBox(
+                width: double.infinity,
+                height: 38,
+                child: OutlinedButton.icon(
+                  onPressed: () => _cancelOrder(order),
+                  icon: const Icon(Icons.cancel_outlined, size: 16),
+                  label: const Text('Cancel Order', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFDC2626),
+                    side: const BorderSide(color: Color(0xFFDC2626)),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                 ),

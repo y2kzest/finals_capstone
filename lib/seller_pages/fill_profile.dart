@@ -4,7 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/seller_approval_notifications.dart';
 
 // Defined constants for consistent design
-const Color kPrimaryBlue = Color(0xFF3455EB);
+const Color kPrimaryBlue = Color(0xFF2A4BA0);
 const Color kInactiveGrey = Color(0xFFE0E0E0);
 const Color kTextGrey = Color(0xFF757575);
 
@@ -19,9 +19,6 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
   // Controllers for input fields
   final TextEditingController _storeInfoController = TextEditingController(
     text: 'The Ultimate Bazaar',
-  );
-  final TextEditingController _stallNumberController = TextEditingController(
-    text: 'Stall 4A',
   );
   final TextEditingController _storeAddressController = TextEditingController(
     text: '123 Market Street, Downtown Area',
@@ -46,7 +43,6 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
   @override
   void dispose() {
     _storeInfoController.dispose();
-    _stallNumberController.dispose();
     _storeAddressController.dispose();
     _contactEmailController.dispose();
     super.dispose();
@@ -119,7 +115,6 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
         'full_name': fullName,
         'store_name': _storeInfoController.text,
         'store_information_final': _storeInfoController.text,
-        'stall_number': _stallNumberController.text,
         'store_address': _storeAddressController.text,
         'official_contact_email': contactEmail,
         'is_profile_finalized':
@@ -141,7 +136,7 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
             .syncExternalAdmin(
               userId: userId,
               storeName: _storeInfoController.text.trim(),
-              stallNo: _stallNumberController.text.trim(),
+              stallNo: '',
               businessType: 'Retail Store',
               contactEmail: contactEmail,
             );
@@ -328,12 +323,6 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
                       hint:
                           "Provide a short description of your store or services",
                       maxLines: 3,
-                    ),
-                    const SizedBox(height: 20),
-                    _buildTextField(
-                      label: "Stall Number",
-                      controller: _stallNumberController,
-                      hint: "e.g., Kiosk 2B or Stall 4A",
                     ),
                     const SizedBox(height: 20),
                     _buildTextField(

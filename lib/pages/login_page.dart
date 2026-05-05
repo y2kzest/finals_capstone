@@ -32,9 +32,9 @@ class _LoginPageState extends State<LoginPage> {
   late final StreamSubscription<AuthState> _authSub;
 
   // Primary design color (Standard Blue for links/focus)
-  static const Color kPrimaryBlue = Color(0xFF1E88E5);
+  static const Color kPrimaryBlue = Color(0xFF2A4BA0);
   // Darker Blue for the main button and branding
-  static const Color kButtonBlue = Color(0xFF334D8C);
+  static const Color kButtonBlue = Color(0xFF153075);
 
   @override
   void initState() {
@@ -49,6 +49,24 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _navigateAfterSignIn() async {
     if (!mounted) return;
+
+    // Check if account is suspended (admin sets profiles.status = 'suspended')
+    final currentUser = supabase.auth.currentUser;
+    if (currentUser != null) {
+      final profile = await supabase
+          .from('profiles')
+          .select('status')
+          .eq('id', currentUser.id)
+          .maybeSingle();
+      if (profile?['status'] == 'suspended') {
+        await supabase.auth.signOut();
+        _navigatedAfterAuth = false;
+        _showSnackBar(
+          'Your account has been suspended. Please contact the administrator.',
+        );
+        return;
+      }
+    }
 
     // All users go to the buyer app — sellers access their dashboard from Profile
     Navigator.pushReplacement(
@@ -436,10 +454,10 @@ class _LoginPageState extends State<LoginPage> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        padding: const EdgeInsets.symmetric(horizontal: 80),
                         child: Image.asset(
                           "assets/img/logo.png",
-                          height: 72,
+                          height: 90,
                           fit: BoxFit.contain,
                           errorBuilder: (context, error, stackTrace) {
                             return const Text(

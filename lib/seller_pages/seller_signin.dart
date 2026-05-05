@@ -39,7 +39,7 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Verification email resent to $email'),
-            backgroundColor: const Color(0xFF25509E),
+            backgroundColor: const Color(0xFF2A4BA0),
           ),
         );
       }
@@ -164,7 +164,7 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
               content: Text(
                 'Seller account created and queued for admin approval.',
               ),
-              backgroundColor: Color(0xFF25509E),
+              backgroundColor: Color(0xFF2A4BA0),
               duration: Duration(seconds: 6),
             ),
           );
@@ -193,7 +193,7 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text("Sign up successful!"),
-              backgroundColor: Color(0xFF25509E),
+              backgroundColor: Color(0xFF2A4BA0),
             ),
           );
           _navigatedAfterAuth = true;
@@ -275,7 +275,7 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
                   content: Text(
                     'Seller account created without email verification and queued for admin approval.',
                   ),
-                  backgroundColor: Color(0xFF25509E),
+                  backgroundColor: Color(0xFF2A4BA0),
                   duration: Duration(seconds: 8),
                 ),
               );
@@ -428,21 +428,24 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Image.asset(
-                        "assets/img/logo.png",
-                        height: 88,
-                        fit: BoxFit.contain,
-                        errorBuilder: (context, error, stackTrace) {
-                          return const Text(
-                            "QUICKCART",
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 30,
-                              fontWeight: FontWeight.w900,
-                              color: Color(0xFF6A7185),
-                            ),
-                          );
-                        },
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 80),
+                        child: Image.asset(
+                          "assets/img/logo.png",
+                          height: 100,
+                          fit: BoxFit.contain,
+                          errorBuilder: (context, error, stackTrace) {
+                            return const Text(
+                              "QUICKCART",
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 30,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFF6A7185),
+                              ),
+                            );
+                          },
+                        ),
                       ),
                       const SizedBox(height: 14),
                       const Text(
@@ -516,11 +519,11 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: _agreedToTerms
-                                    ? const Color(0xFF25509E)
+                                    ? const Color(0xFF2A4BA0)
                                     : const Color(0xFFF5F6FA),
                                 border: Border.all(
                                   color: _agreedToTerms
-                                      ? const Color(0xFF25509E)
+                                      ? const Color(0xFF2A4BA0)
                                       : Colors.grey.shade300,
                                 ),
                               ),
@@ -546,7 +549,7 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
                                   TextSpan(
                                     text: "User Agreement",
                                     style: TextStyle(
-                                      color: Color(0xFF0F3C5A),
+                                      color: Color(0xFF153075),
                                       fontWeight: FontWeight.w600,
                                     ),
                                   ),
@@ -554,7 +557,7 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
                                   TextSpan(
                                     text: "Privacy Policy",
                                     style: TextStyle(
-                                      color: Color(0xFF0F3C5A),
+                                      color: Color(0xFF153075),
                                       fontWeight: FontWeight.w600,
                                     ),
                                   ),
@@ -571,7 +574,7 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
                         child: ElevatedButton(
                           onPressed: _isLoading ? null : _signUpSeller,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF25509E),
+                            backgroundColor: const Color(0xFF2A4BA0),
                             elevation: 2,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(14),
@@ -654,7 +657,7 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
                                 TextSpan(
                                   text: "Back to Sign In",
                                   style: TextStyle(
-                                    color: Color(0xFF0F3C5A),
+                                    color: Color(0xFF153075),
                                     fontWeight: FontWeight.w700,
                                   ),
                                 ),
@@ -716,7 +719,7 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Color(0xFF25509E)),
+          borderSide: const BorderSide(color: Color(0xFF2A4BA0)),
         ),
         suffixIcon: isPassword
             ? IconButton(

@@ -4,8 +4,8 @@ import 'verification/otp.dart'; // Assuming you named your OTP file 'otp.dart'
 import 'utils/helpers.dart';
 
 // --- CONSTANTS ---
-const Color kPrimaryBlue = Color(0xFF1E88E5);
-const Color kButtonBlue = Color(0xFF334D8C);
+const Color kPrimaryBlue = Color(0xFF2A4BA0);
+const Color kButtonBlue = Color(0xFF153075);
 
 // Helper function to check if input is likely an email (contains '@' and '.')
 
@@ -206,10 +206,10 @@ class _SignupPageState extends State<SignupPage> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        padding: const EdgeInsets.symmetric(horizontal: 80),
                         child: Image.asset(
                           "assets/img/logo.png",
-                          height: 72,
+                          height: 90,
                           fit: BoxFit.contain,
                           errorBuilder: (context, error, stackTrace) {
                             return const Text(

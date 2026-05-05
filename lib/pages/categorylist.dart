@@ -21,7 +21,7 @@ class _CategoryListPageState extends State<CategoryListPage> {
   String _selectedSort = 'Newest';
   final TextEditingController _searchController = TextEditingController();
 
-  static const _kPrimary = Color(0xFF1A4DBE);
+  static const _kPrimary = Color(0xFF2A4BA0);
   static const _kSurface = Color(0xFFF5F6FB);
   static const _kCard = Colors.white;
   static const _kTextPrimary = Color(0xFF111827);
@@ -59,6 +59,8 @@ class _CategoryListPageState extends State<CategoryListPage> {
         return 'Service';
       case 'Apparel':
         return 'Apparel';
+      case 'Karinderya':
+        return 'Karinderya';
       default:
         return widget.category;
     }
@@ -140,6 +142,11 @@ class _CategoryListPageState extends State<CategoryListPage> {
       'seller_is_open': sellerIsOpen,
       'opening_time': openTime,
       'closing_time': closeTime,
+      'product_type': (raw['product_type'] ?? 'retail').toString(),
+      'pricing_basis': (raw['pricing_basis'] ?? '').toString(),
+      'prep_time': (raw['prep_time'] ?? '').toString(),
+      'variants': (raw['variants'] ?? '').toString(),
+      'daily_available': raw['daily_available'] ?? true,
     };
   }
 
@@ -158,6 +165,31 @@ class _CategoryListPageState extends State<CategoryListPage> {
     } catch (_) {
       return p['seller_is_open'] == true;
     }
+  }
+
+  Widget _buildOpenBadge(Map<String, dynamic> p) {
+    final open = _isShopOpen(p);
+    final openTime = p['opening_time']?.toString() ?? '05:00';
+    final closeTime = p['closing_time']?.toString() ?? '19:00';
+    final color =
+        open ? const Color(0xFF059669) : const Color(0xFFDC2626);
+    final label = open
+        ? 'Open \u00b7 Closes ${to12Hour(closeTime)}'
+        : 'Closed \u00b7 Opens ${to12Hour(openTime)}';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+            color: color, fontSize: 10, fontWeight: FontWeight.w700),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
   }
 
   List<Map<String, dynamic>> _filteredAndSorted() {
@@ -285,30 +317,6 @@ class _CategoryListPageState extends State<CategoryListPage> {
     );
   }
 
-  Widget _buildOpenBadge(Map<String, dynamic> p) {
-    final open = _isShopOpen(p);
-    final openTime = p['opening_time']?.toString() ?? '05:00';
-    final closeTime = p['closing_time']?.toString() ?? '19:00';
-    final color =
-        open ? const Color(0xFF059669) : const Color(0xFFDC2626);
-    final label =
-        open ? 'Open \u00b7 Closes ${to12Hour(closeTime)}' : 'Closed \u00b7 Opens ${to12Hour(openTime)}';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-            color: color, fontSize: 10, fontWeight: FontWeight.w700),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-    );
-  }
-
   Widget _buildProductCard(Map<String, dynamic> p) {
     final name = p['product_name'].toString();
     final imageUrl = p['image_url'].toString();
@@ -374,6 +382,29 @@ class _CategoryListPageState extends State<CategoryListPage> {
                           fontWeight: FontWeight.w700,
                           color: _kPrimary),
                     ),
+                    if (p['product_type'] == 'karinderya') ...[  
+                      const SizedBox(height: 4),
+                      Row(children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFF6B35).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text('Cooked',
+                              style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Color(0xFFD4500A))),
+                        ),
+                        if ((p['prep_time'] as String).isNotEmpty) ...[  
+                          const SizedBox(width: 4),
+                          Icon(Icons.schedule_rounded, size: 10, color: Colors.grey[500]),
+                          const SizedBox(width: 2),
+                          Text(p['prep_time'].toString(),
+                              style: TextStyle(fontSize: 9, color: Colors.grey[600])),
+                        ],
+                      ]),
+                    ],
+                    const SizedBox(height: 4),
+                    _buildOpenBadge(p),
                     const SizedBox(height: 4),
                     const Spacer(),
                     SizedBox(
@@ -427,7 +458,7 @@ class _CategoryListPageState extends State<CategoryListPage> {
                   gradient: const LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [Color(0xFF1A4DBE), Color(0xFF2A4BA0)],
+                    colors: [Color(0xFF2A4BA0), Color(0xFF153075)],
                   ),
                   boxShadow: const [
                     BoxShadow(
@@ -493,7 +524,7 @@ class _CategoryListPageState extends State<CategoryListPage> {
                               )
                             : null,
                         filled: true,
-                        fillColor: const Color(0xFF173C9E),
+                        fillColor: const Color(0xFF153075),
                         hintStyle:
                             const TextStyle(color: Colors.white70),
                         border: OutlineInputBorder(

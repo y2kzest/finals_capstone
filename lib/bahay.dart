@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'profile.dart';
 import 'pages/home_page.dart';
 import 'pages/category_page.dart';
+import 'pages/buyer_messages_page.dart';
 
 class Bahay extends StatelessWidget {
   const Bahay({super.key});
@@ -24,7 +25,12 @@ class _MainNavigationState extends State<MainNavigation> {
   int _selectedIndex = 0;
 
   // Keep only the tabs that are needed in the buyer app.
-  final List<Widget> _pages = const [HomePage(), CategoryPage(), Profile()];
+  final List<Widget> _pages = const [
+    HomePage(),
+    CategoryPage(),
+    BuyerMessagesPage(),
+    Profile(),
+  ];
 
   final List<_NavItemData> _navItems = const [
     _NavItemData(
@@ -36,6 +42,11 @@ class _MainNavigationState extends State<MainNavigation> {
       label: 'Categories',
       icon: Icons.grid_view_rounded,
       activeIcon: Icons.dashboard_rounded,
+    ),
+    _NavItemData(
+      label: 'Messages',
+      icon: Icons.chat_bubble_outline_rounded,
+      activeIcon: Icons.chat_bubble_rounded,
     ),
     _NavItemData(
       label: 'Profile',
@@ -76,7 +87,7 @@ class _MainNavigationState extends State<MainNavigation> {
                     height: 260,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: const Color(0xFF1A4DBE).withValues(alpha: 0.10),
+                      color: const Color(0xFF2A4BA0).withValues(alpha: 0.10),
                     ),
                   ),
                 ),
@@ -88,7 +99,7 @@ class _MainNavigationState extends State<MainNavigation> {
                     height: 220,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: const Color(0xFFF5A524).withValues(alpha: 0.10),
+                      color: const Color(0xFFF9B023).withValues(alpha: 0.10),
                     ),
                   ),
                 ),
@@ -145,7 +156,7 @@ class _MainNavigationState extends State<MainNavigation> {
                           ? const LinearGradient(
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
-                              colors: [Color(0xFFF5A524), Color(0xFFFFC457)],
+                              colors: [Color(0xFFF9B023), Color(0xFFFFC83A)],
                             )
                           : null,
                     ),
@@ -167,7 +178,7 @@ class _MainNavigationState extends State<MainNavigation> {
                             isActive ? item.activeIcon : item.icon,
                             key: ValueKey('${item.label}-$isActive'),
                             color: isActive
-                                ? const Color(0xFF1A3C8C)
+                                ? const Color(0xFF153075)
                                 : const Color(0xFF96A0B5),
                             size: 22,
                           ),
@@ -177,7 +188,7 @@ class _MainNavigationState extends State<MainNavigation> {
                           duration: const Duration(milliseconds: 180),
                           style: TextStyle(
                             color: isActive
-                                ? const Color(0xFF1A3C8C)
+                                ? const Color(0xFF153075)
                                 : const Color(0xFF96A0B5),
                             fontWeight: isActive
                                 ? FontWeight.w700
