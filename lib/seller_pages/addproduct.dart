@@ -40,6 +40,13 @@ class _AddProductPageState extends State<AddProductPage> {
   bool _isSaving = false;
   static const int _maxImages = 5;
 
+  int? _parseWholeNumber(String raw) {
+    final value = double.tryParse(raw.trim());
+    if (value == null) return null;
+    if (value != value.truncateToDouble()) return null;
+    return value.toInt();
+  }
+
   Future<void> pickImages() async {
     final picker = ImagePicker();
     final remaining = _maxImages - _pickedFiles.length;
@@ -87,10 +94,28 @@ class _AddProductPageState extends State<AddProductPage> {
       return;
     }
 
+    final priceValue = _parseWholeNumber(priceCtrl.text);
+    if (priceValue == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Price must be a whole number.')),
+      );
+      return;
+    }
+
+    final retailPriceValue = (isApparel || isKarinderya)
+        ? 0
+        : _parseWholeNumber(retailPriceCtrl.text);
+    if (!isApparel && !isKarinderya && retailPriceValue == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Retail price must be a whole number.')),
+      );
+      return;
+    }
+
     // Retail price must be higher than selling price when provided
     if (!isApparel && !isKarinderya) {
-      final price = double.tryParse(priceCtrl.text) ?? 0;
-      final retailPrice = double.tryParse(retailPriceCtrl.text) ?? 0;
+      final price = priceValue;
+      final retailPrice = retailPriceValue ?? 0;
       if (retailPrice > 0 && retailPrice <= price) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -122,9 +147,9 @@ class _AddProductPageState extends State<AddProductPage> {
       'seller_id': userId,
       'name': nameCtrl.text,
       'category': selectedCategory,
-      'price': double.parse(priceCtrl.text),
-      'retail_price': (isApparel || isKarinderya) ? 0.0 : double.parse(retailPriceCtrl.text),
-      'stock_quantity': (isApparel || isKarinderya) ? 0 : int.parse(stockCtrl.text),
+      'price': priceValue,
+      'retail_price': (isApparel || isKarinderya) ? 0 : (retailPriceValue ?? 0),
+      'stock_quantity': (isApparel || isKarinderya) ? 0 : (double.tryParse(stockCtrl.text)?.toInt() ?? 0),
       'unit_type': (isApparel) ? 'pcs' : selectedUnit,
       'description': descriptionCtrl.text,
       'image_url': imageUrls.isNotEmpty ? imageUrls.first : null,

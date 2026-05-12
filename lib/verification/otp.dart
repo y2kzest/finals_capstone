@@ -1,18 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../utils/helpers.dart';
 
-// This page is responsible for accepting the 6-digit code sent via SMS
+// This page is responsible for accepting the 6-digit code sent via SMS or Email
 class OtpVerificationPage extends StatefulWidget {
-  // CRITICAL FIX: Ensure 'phoneNumber' is defined as a final field
-  // and is REQUIRED in the constructor.
-  final String phoneNumber;
+  final String contact;
 
   // The constructor must use the named parameter syntax
   const OtpVerificationPage({
     super.key,
-    required this.phoneNumber,
-  }); // <--- THIS LINE IS THE FIX
+    required this.contact,
+  }); 
 
   @override
   State<OtpVerificationPage> createState() => _OtpVerificationPageState();
@@ -25,6 +24,8 @@ class _OtpVerificationPageState extends State<OtpVerificationPage> {
 
   static const Color kPrimaryBlue = Color(0xFF2A4BA0);
   static const Color kButtonBlue = Color(0xFF153075);
+
+  bool get _isEmailContact => isEmail(widget.contact);
 
   @override
   void dispose() {
@@ -51,18 +52,36 @@ class _OtpVerificationPageState extends State<OtpVerificationPage> {
     setState(() => _isLoading = true);
 
     try {
-      // Verify the OTP using the phone number and the received token
-      final AuthResponse res = await supabase.auth.verifyOTP(
-        type: OtpType.sms,
-        phone: widget.phoneNumber, // Access the passed parameter via widget.
-        token: token,
-      );
+      // Verify the OTP using the contact (email or phone) and the received token
+      final AuthResponse res;
+      if (_isEmailContact) {
+        res = await supabase.auth.verifyOTP(
+          type: OtpType.signup, // 'signup' is specifically for new email registrations
+          email: widget.contact,
+          token: token,
+        );
+      } else {
+        res = await supabase.auth.verifyOTP(
+          type: OtpType.sms,
+          phone: widget.contact,
+          token: token,
+        );
+      }
 
       if (res.session != null) {
-        _showSnackBar("Login Successful! Welcome to QuickCart.");
+        _showSnackBar("Verification Successful! Welcome to QuickCart.");
         if (!mounted) return;
 
         _otpController.clear();
+        
+        // Ensure user has the buyer role before going to home
+        try {
+          await supabase.from('user_roles').upsert({
+            'user_id': res.user!.id,
+            'role': 'buyer',
+          });
+        } catch (_) {}
+
         // Navigate to the home screen
         Navigator.of(
           context,
@@ -84,7 +103,7 @@ class _OtpVerificationPageState extends State<OtpVerificationPage> {
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
-        title: const Text('Verify Phone Number'),
+        title: Text(_isEmailContact ? 'Verify Email' : 'Verify Phone Number'),
         backgroundColor: kButtonBlue,
         foregroundColor: Colors.white,
       ),
@@ -129,7 +148,7 @@ class _OtpVerificationPageState extends State<OtpVerificationPage> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        "We sent a 6-digit code to ${widget.phoneNumber}",
+                        "We sent a 6-digit code to ${widget.contact}",
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 14, color: Colors.grey[700]),
                       ),

@@ -23,14 +23,23 @@ class _EditProductPageState extends State<EditProductPage> {
   late final TextEditingController retailPriceCtrl;
   late final TextEditingController stockCtrl;
   late final TextEditingController descriptionCtrl;
+  late final TextEditingController variantsCtrl;
+  late final TextEditingController prepTimeCtrl;
 
   late String selectedCategory;
   late String selectedUnit;
+  late String selectedPricingBasis;
+  bool dailyAvailable = true;
 
   static const List<String> categories = [
-    'Fish', 'Meat', 'Vegetable', 'Fruit', 'Service', 'Apparel'
+    'Fish', 'Meat', 'Vegetable', 'Fruit', 'Service', 'Apparel', 'Karinderya'
   ];
-  static const List<String> unitTypes = ['Kg', 'pcs', 'g'];
+  static const List<String> unitTypes = [
+    'Kg', 'pcs', 'g', 'serving', 'order', 'plate'
+  ];
+  static const List<String> _pricingBases = [
+    'per serving', 'per order', 'per kilo', 'per piece'
+  ];
 
   // Existing images loaded from DB (URLs)
   List<String> _existingImages = [];
@@ -39,6 +48,13 @@ class _EditProductPageState extends State<EditProductPage> {
   final List<Uint8List> _newBytes = [];
   bool _isSaving = false;
   static const int _maxImages = 5;
+
+  int? _parseWholeNumber(String raw) {
+    final value = double.tryParse(raw.trim());
+    if (value == null) return null;
+    if (value != value.truncateToDouble()) return null;
+    return value.toInt();
+  }
 
   @override
   void initState() {
@@ -54,12 +70,32 @@ class _EditProductPageState extends State<EditProductPage> {
         text: (p['stock_quantity'] as num?)?.toString() ?? '');
     descriptionCtrl = TextEditingController(
         text: p['description']?.toString() ?? '');
+    variantsCtrl = TextEditingController(
+      text: p['variants']?.toString() ?? '');
+    prepTimeCtrl = TextEditingController(
+      text: p['prep_time']?.toString() ?? '');
 
-    final rawCat = p['category']?.toString() ?? 'Fish';
-    selectedCategory = categories.contains(rawCat) ? rawCat : 'Fish';
+    final rawCat = p['category']?.toString();
+    final productType = p['product_type']?.toString();
+    selectedCategory = (rawCat != null && categories.contains(rawCat))
+      ? rawCat
+      : (productType == 'karinderya' ? 'Karinderya' : 'Fish');
 
-    final rawUnit = p['unit_type']?.toString() ?? 'Kg';
-    selectedUnit = unitTypes.contains(rawUnit) ? rawUnit : 'Kg';
+    final rawPricing = p['pricing_basis']?.toString() ?? _pricingBases.first;
+    selectedPricingBasis = _pricingBases.contains(rawPricing)
+      ? rawPricing
+      : _pricingBases.first;
+    dailyAvailable = p['daily_available'] == null
+      ? true
+      : p['daily_available'] == true;
+
+    final rawUnit = p['unit_type']?.toString() ?? '';
+    final fallbackUnit = selectedCategory == 'Karinderya'
+      ? 'serving'
+      : selectedCategory == 'Apparel'
+        ? 'pcs'
+        : 'Kg';
+    selectedUnit = unitTypes.contains(rawUnit) ? rawUnit : fallbackUnit;
 
     // Load existing images — prefer image_urls array, fallback to image_url
     final rawUrls = p['image_urls'];
@@ -81,6 +117,8 @@ class _EditProductPageState extends State<EditProductPage> {
     retailPriceCtrl.dispose();
     stockCtrl.dispose();
     descriptionCtrl.dispose();
+    variantsCtrl.dispose();
+    prepTimeCtrl.dispose();
     super.dispose();
   }
 
@@ -123,6 +161,7 @@ class _EditProductPageState extends State<EditProductPage> {
 
   Future<void> _saveChanges() async {
     final isApparel = selectedCategory == 'Apparel';
+    final isKarinderya = selectedCategory == 'Karinderya';
     if (nameCtrl.text.trim().isEmpty || priceCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please fill all required fields.')),
@@ -130,10 +169,30 @@ class _EditProductPageState extends State<EditProductPage> {
       return;
     }
 
+    final priceValue = _parseWholeNumber(priceCtrl.text);
+    if (priceValue == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Price must be a whole number.')),
+      );
+      return;
+    }
+
+    final retailPriceValue = (isApparel || isKarinderya)
+        ? 0
+        : (retailPriceCtrl.text.trim().isEmpty
+            ? 0
+            : _parseWholeNumber(retailPriceCtrl.text));
+    if (!isApparel && !isKarinderya && retailPriceValue == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Retail price must be a whole number.')),
+      );
+      return;
+    }
+
     // Retail price must be higher than selling price when provided
-    if (!isApparel) {
-      final price = double.tryParse(priceCtrl.text) ?? 0;
-      final retailPrice = double.tryParse(retailPriceCtrl.text) ?? 0;
+    if (!isApparel && !isKarinderya) {
+      final price = priceValue;
+      final retailPrice = retailPriceValue ?? 0;
       if (retailPrice > 0 && retailPrice <= price) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -164,14 +223,22 @@ class _EditProductPageState extends State<EditProductPage> {
     final updates = {
       'name': nameCtrl.text.trim(),
       'category': selectedCategory,
-      'price': double.tryParse(priceCtrl.text) ?? 0.0,
-      'retail_price':
-          isApparel ? 0.0 : (double.tryParse(retailPriceCtrl.text) ?? 0.0),
-      'stock_quantity': isApparel ? 0 : (int.tryParse(stockCtrl.text) ?? 0),
+      'price': priceValue,
+      'retail_price': (isApparel || isKarinderya) ? 0 : (retailPriceValue ?? 0),
+      'stock_quantity': (isApparel || isKarinderya)
+          ? 0
+          : (double.tryParse(stockCtrl.text)?.toInt() ?? 0),
       'unit_type': isApparel ? 'pcs' : selectedUnit,
       'description': descriptionCtrl.text.trim(),
       'image_url': allImages.isNotEmpty ? allImages.first : null,
       'image_urls': allImages,
+      'product_type': isKarinderya ? 'karinderya' : 'retail',
+      if (isKarinderya) 'pricing_basis': selectedPricingBasis,
+      if (isKarinderya && variantsCtrl.text.trim().isNotEmpty)
+        'variants': variantsCtrl.text.trim(),
+      if (isKarinderya && prepTimeCtrl.text.trim().isNotEmpty)
+        'prep_time': prepTimeCtrl.text.trim(),
+      if (isKarinderya) 'daily_available': dailyAvailable,
     };
 
     try {
@@ -221,6 +288,7 @@ class _EditProductPageState extends State<EditProductPage> {
   @override
   Widget build(BuildContext context) {
     final isApparel = selectedCategory == 'Apparel';
+    final isKarinderya = selectedCategory == 'Karinderya';
     return Scaffold(
       backgroundColor: _kSurface,
       body: SafeArea(
@@ -265,8 +333,14 @@ class _EditProductPageState extends State<EditProductPage> {
                       icon: Icons.category_outlined,
                       value: selectedCategory,
                       items: categories,
-                      onChanged: (v) =>
-                          setState(() => selectedCategory = v!),
+                      onChanged: (v) => setState(() {
+                        selectedCategory = v!;
+                        if (v == 'Karinderya') {
+                          selectedUnit = 'serving';
+                        } else if (v == 'Apparel') {
+                          selectedUnit = 'pcs';
+                        }
+                      }),
                     ),
                     const SizedBox(height: 14),
                     _modernField(
@@ -277,9 +351,91 @@ class _EditProductPageState extends State<EditProductPage> {
                     const SizedBox(height: 24),
 
                     _sectionTitle(
-                        isApparel ? 'Pricing' : 'Pricing & Stock'),
+                        isApparel
+                            ? 'Pricing'
+                            : isKarinderya
+                                ? 'Karinderya Pricing & Details'
+                                : 'Pricing & Stock'),
                     const SizedBox(height: 12),
-                    if (isApparel) ...[
+                    if (isKarinderya) ...[
+                      _modernDropdown<String>(
+                        label: 'Pricing Basis',
+                        icon: Icons.price_change_outlined,
+                        value: selectedPricingBasis,
+                        items: _pricingBases,
+                        onChanged: (v) =>
+                            setState(() => selectedPricingBasis = v!),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(children: [
+                        Expanded(
+                            child: _modernField(
+                                label: 'Price',
+                                controller: priceCtrl,
+                                icon: Icons.payments_outlined,
+                            prefix: '₱',
+                                isNumber: true)),
+                        const SizedBox(width: 12),
+                        Expanded(
+                            child: _modernDropdown<String>(
+                          label: 'Unit',
+                          icon: Icons.straighten_outlined,
+                          value: selectedUnit,
+                          items: unitTypes,
+                          onChanged: (v) =>
+                              setState(() => selectedUnit = v!),
+                        )),
+                      ]),
+                      const SizedBox(height: 14),
+                      _modernField(
+                        label: 'Prep / Pickup Readiness (e.g. 10-15 mins)',
+                        controller: prepTimeCtrl,
+                        icon: Icons.schedule_rounded,
+                      ),
+                      const SizedBox(height: 14),
+                      _modernField(
+                        label: 'Variants (optional, e.g. With rice / Without rice)',
+                        controller: variantsCtrl,
+                        icon: Icons.tune_rounded,
+                      ),
+                      const SizedBox(height: 14),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                          boxShadow: [
+                            BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.04),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2))
+                          ],
+                        ),
+                        child: Row(children: [
+                          const Icon(Icons.today_rounded, size: 20, color: _kPrimary),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                              child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Available today',
+                                  style: TextStyle(
+                                      fontSize: 14, fontWeight: FontWeight.w600)),
+                              Text(
+                                  "Toggle off if today's menu is not ready",
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: Color(0xFF9CA3AF))),
+                            ],
+                          )),
+                          Switch(
+                            value: dailyAvailable,
+                            onChanged: (v) => setState(() => dailyAvailable = v),
+                            activeColor: _kPrimary,
+                          ),
+                        ]),
+                      ),
+                    ] else if (isApparel) ...[
                       _modernField(
                           label: 'Price',
                           controller: priceCtrl,
@@ -293,7 +449,7 @@ class _EditProductPageState extends State<EditProductPage> {
                                 label: 'Price',
                                 controller: priceCtrl,
                                 icon: Icons.payments_outlined,
-                                prefix: '₱',
+                            prefix: '₱',
                                 isNumber: true)),
                         const SizedBox(width: 12),
                         Expanded(
@@ -301,7 +457,7 @@ class _EditProductPageState extends State<EditProductPage> {
                                 label: 'Retail Price',
                                 controller: retailPriceCtrl,
                                 icon: Icons.sell_outlined,
-                                prefix: '₱',
+                            prefix: '₱',
                                 isNumber: true)),
                       ]),
                       const SizedBox(height: 14),

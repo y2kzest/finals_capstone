@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'edit_stall_location.dart';
+
 const Color _kPrimary = Color(0xFF2A4BA0);
 const Color _kSurface = Color(0xFFF5F6FB);
 
@@ -356,6 +358,64 @@ class _EditStoreInfoPageState extends State<EditStoreInfoPage> {
                     maxLines: 2,
                     validator: (v) =>
                         (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Stall location on map
+                  _label('Stall Location on Map'),
+                  _card(
+                    child: InkWell(
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const EditStallLocationPage(),
+                        ),
+                      ),
+                      borderRadius: BorderRadius.circular(10),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: _kPrimary.withAlpha(26),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(
+                              Icons.map_outlined,
+                              color: _kPrimary,
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Pin Your Stall',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                SizedBox(height: 2),
+                                Text(
+                                  'Tap to place a pin or use GPS so buyers can find you.',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Color(0xFF6B7280),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(
+                            Icons.chevron_right_rounded,
+                            color: Color(0xFFADB5BD),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 14),
 

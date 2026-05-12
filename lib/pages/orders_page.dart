@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+
+import '../utils/delivery_route_preview.dart';
+import '../utils/market_geo.dart';
+import 'pick_location_page.dart';
 
 class OrdersPage extends StatefulWidget {
   const OrdersPage({super.key});
@@ -94,6 +99,104 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     reasonCtrl.dispose();
   }
 
+  Future<void> _repinOrder(Map<String, dynamic> order) async {
+    final orderId = order['id']?.toString();
+    if (orderId == null) return;
+    final existingLat = (order['delivery_lat'] as num?)?.toDouble();
+    final existingLng = (order['delivery_lng'] as num?)?.toDouble();
+    final initialPoint = (existingLat != null && existingLng != null)
+        ? LatLng(existingLat, existingLng)
+        : null;
+
+    final picked = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PickLocationPage(
+          title: 'Pin this Order',
+          initialPoint: initialPoint,
+          initialAddress: order['delivery_address']?.toString(),
+        ),
+      ),
+    );
+    if (picked == null) return;
+
+    try {
+      await supabase.from('orders').update({
+        'delivery_lat': picked['lat'],
+        'delivery_lng': picked['lng'],
+        'delivery_address': picked['address'],
+      }).eq('id', orderId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Location updated. The seller can now see your pin.'),
+            backgroundColor: _kPrimary,
+          ),
+        );
+        setState(() => _isLoading = true);
+        _fetchOrders();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not update pin: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _backfillDeliveryCoords(
+    List<Map<String, dynamic>> orders,
+    String userId,
+  ) async {
+    final pending = orders.where((o) {
+      final type = (o['order_type']?.toString() ?? 'pickup');
+      final addr = o['delivery_address']?.toString().trim() ?? '';
+      return type == 'delivery' &&
+          addr.isNotEmpty &&
+          (o['delivery_lat'] == null || o['delivery_lng'] == null);
+    }).toList();
+    if (pending.isEmpty) return;
+
+    try {
+      final addrs = await supabase
+          .from('delivery_addresses')
+          .select('address, lat, lng')
+          .eq('user_id', userId)
+          .not('lat', 'is', null)
+          .not('lng', 'is', null);
+
+      final pinned = <String, Map<String, double>>{};
+      for (final a in (addrs as List)) {
+        final text = a['address']?.toString().trim().toLowerCase();
+        final lat = (a['lat'] as num?)?.toDouble();
+        final lng = (a['lng'] as num?)?.toDouble();
+        if (text == null || text.isEmpty || lat == null || lng == null) continue;
+        pinned[text] = {'lat': lat, 'lng': lng};
+      }
+      if (pinned.isEmpty) return;
+
+      for (final o in pending) {
+        final key = o['delivery_address']?.toString().trim().toLowerCase();
+        if (key == null) continue;
+        final match = pinned[key];
+        if (match == null) continue;
+        try {
+          await supabase.from('orders').update({
+            'delivery_lat': match['lat'],
+            'delivery_lng': match['lng'],
+          }).eq('id', o['id']);
+          o['delivery_lat'] = match['lat'];
+          o['delivery_lng'] = match['lng'];
+        } catch (e) {
+          debugPrint('Backfill failed for order ${o['id']}: $e');
+        }
+      }
+    } catch (e) {
+      debugPrint('Backfill load failed: $e');
+    }
+  }
+
   Future<void> _fetchOrders() async {
     final user = supabase.auth.currentUser;
     if (user == null) {
@@ -114,22 +217,25 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
           .whereType<String>()
           .toSet()
           .toList();
-      final Map<String, Map<String, String?>> sellerInfo = {};
+      final Map<String, Map<String, dynamic>> sellerInfo = {};
       if (sellerIds.isNotEmpty) {
         try {
           final profiles = await supabase
               .from('seller_profiles')
-              .select('user_id, store_address')
+              .select('user_id, store_address, stall_lat, stall_lng')
               .inFilter('user_id', sellerIds);
           for (final p in profiles as List) {
             sellerInfo[p['user_id'].toString()] = {
               'store_address': p['store_address']?.toString(),
+              'stall_lat': (p['stall_lat'] as num?)?.toDouble(),
+              'stall_lng': (p['stall_lng'] as num?)?.toDouble(),
             };
           }
         } catch (_) {}
       }
 
-      // Merge: prefer value stored on the order; fall back to live seller profile
+      // Merge: prefer value stored on the order; fall back to live seller profile.
+      // Legacy orders won't have store_lat/lng snapshots yet — fill those in too.
       for (final o in orders) {
         final sid = o['seller_id']?.toString();
         final info = sid != null ? sellerInfo[sid] : null;
@@ -137,7 +243,19 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
             info?['store_address'] != null) {
           o['store_address'] = info!['store_address'];
         }
+        if (o['store_lat'] == null && info?['stall_lat'] != null) {
+          o['store_lat'] = info!['stall_lat'];
+        }
+        if (o['store_lng'] == null && info?['stall_lng'] != null) {
+          o['store_lng'] = info!['stall_lng'];
+        }
       }
+
+      // Backfill delivery_lat/lng on any delivery orders that were placed
+      // before the buyer pinned an address. We match the saved
+      // `delivery_addresses` row by address text and write the coords back to
+      // the order row so the seller's map view picks it up too.
+      await _backfillDeliveryCoords(orders, user.id);
 
       if (!mounted) return;
       setState(() {
@@ -183,11 +301,13 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     }
   }
 
-  String _statusLabel(String status) {
+  String _statusLabel(String status, {bool isDelivery = false}) {
     switch (status) {
       case 'pending': return 'Waiting for seller';
-      case 'preparing': case 'accepted': return 'Seller is preparing';
-      case 'ready': return 'Ready for pickup';
+      case 'preparing': case 'accepted':
+        return isDelivery ? 'Seller is preparing your order' : 'Seller is preparing';
+      case 'ready':
+        return isDelivery ? 'Out for delivery' : 'Ready for pickup';
       case 'completed': return 'Completed';
       case 'declined': return 'Declined by seller';
       case 'cancelled': return 'Cancelled by you';
@@ -419,6 +539,10 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     final shortId = orderId.length > 8 ? orderId.substring(0, 8) : orderId;
     final imgUrl = order['image_url']?.toString().trim() ?? '';
     final declinedReason = order['declined_reason']?.toString();
+    final storeLat = (order['store_lat'] as num?)?.toDouble();
+    final storeLng = (order['store_lng'] as num?)?.toDouble();
+    final deliveryLat = (order['delivery_lat'] as num?)?.toDouble();
+    final deliveryLng = (order['delivery_lng'] as num?)?.toDouble();
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -602,8 +726,169 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
               ],
             ),
           ),
-          // QR Code button for ready orders
-          if (status == 'ready') ...[
+          // ── Missing-pin CTA: delivery order has no buyer pin yet ──
+          if (status != 'cancelled' &&
+              status != 'declined' &&
+              status != 'completed' &&
+              isDelivery &&
+              (deliveryLat == null || deliveryLng == null)) ...[
+            const Divider(height: 1, indent: 14, endIndent: 14),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF3C7),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFF59E0B)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.warning_amber_rounded,
+                            size: 16, color: Color(0xFFB45309)),
+                        SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'This order has no map pin yet',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFFB45309),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'The rider can\'t find your exact spot without a pin. Tap below to add one.',
+                      style: TextStyle(
+                          fontSize: 11, color: Color(0xFF92400E), height: 1.4),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 36,
+                      child: ElevatedButton.icon(
+                        onPressed: () => _repinOrder(order),
+                        icon: const Icon(Icons.add_location_alt_rounded, size: 16),
+                        label: const Text(
+                          'Pin this order on the map',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700, fontSize: 12),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFB45309),
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+
+          // ── Map: where to pick up (pickup) / delivery destination ──
+          if (status != 'cancelled' &&
+              status != 'declined' &&
+              ((isDelivery && deliveryLat != null && deliveryLng != null) ||
+                  (!isDelivery && storeLat != null && storeLng != null))) ...[
+            const Divider(height: 1, indent: 14, endIndent: 14),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        isDelivery
+                            ? Icons.delivery_dining_rounded
+                            : Icons.map_outlined,
+                        size: 14,
+                        color: _kPrimary,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        isDelivery
+                            ? 'Delivering to your pin'
+                            : 'Where to pick up',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: _kPrimary,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  DeliveryRoutePreview(
+                    height: 140,
+                    shops: storeLat != null && storeLng != null
+                        ? [
+                            StallPoint(
+                              name: storeName,
+                              point: LatLng(storeLat, storeLng),
+                            ),
+                          ]
+                        : const [],
+                    buyer: isDelivery && deliveryLat != null && deliveryLng != null
+                        ? LatLng(deliveryLat, deliveryLng)
+                        : null,
+                  ),
+                  if (!isDelivery && storeLat != null && storeLng != null) ...[
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 38,
+                      child: ElevatedButton.icon(
+                        onPressed: () async {
+                          final ok = await launchExternalNavigation(
+                            LatLng(storeLat, storeLng),
+                            label: storeName,
+                          );
+                          if (!ok && mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Could not open a maps app.'),
+                              ),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.navigation_rounded, size: 16),
+                        label: const Text(
+                          'Navigate to Stall',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700, fontSize: 13),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _kPrimary,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+
+          // QR Code button for ready pickup orders only
+          if (status == 'ready' && !isDelivery) ...[
             const Divider(height: 1, indent: 14, endIndent: 14),
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
@@ -659,7 +944,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
               children: [
                 Icon(_statusIcon(status), size: 16, color: color),
                 const SizedBox(width: 8),
-                Text(_statusLabel(status),
+                Text(_statusLabel(status, isDelivery: isDelivery),
                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color),
                 ),
                 if (status == 'declined' && declinedReason != null && declinedReason.isNotEmpty) ...[

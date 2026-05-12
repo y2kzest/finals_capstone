@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'pick_location_page.dart';
 
 const Color _kPrimary = Color(0xFF2A4BA0);
 const Color _kSurface = Color(0xFFF5F6FB);
@@ -132,236 +135,63 @@ class _AddressesPageState extends State<AddressesPage> {
     await _load();
   }
 
-  Future<void> _showAddEditSheet({Map<String, dynamic>? existing}) async {
-    String selectedLabel = existing?['label']?.toString() ?? 'Home';
-    final addrCtrl =
-        TextEditingController(text: existing?['address']?.toString() ?? '');
-    final customLabelCtrl = TextEditingController(
-      text: ['Home', 'Work', 'Other'].contains(selectedLabel) ? '' : selectedLabel,
-    );
-    final isEditing = existing != null;
+  Future<void> _openMapPicker({Map<String, dynamic>? existing}) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
 
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setLocal) => Padding(
-          padding: EdgeInsets.only(
-            left: 24,
-            right: 24,
-            top: 8,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 28,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Handle bar
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  margin: const EdgeInsets.only(top: 8, bottom: 20),
-                  decoration: BoxDecoration(
-                      color: const Color(0xFFE5E7EB),
-                      borderRadius: BorderRadius.circular(2)),
-                ),
-              ),
-              // Title row
-              Row(children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: _kPrimary.withAlpha(18),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(Icons.add_location_alt_rounded,
-                      color: _kPrimary, size: 20),
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  isEditing ? 'Edit Address' : 'Add New Address',
-                  style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF111827)),
-                ),
-              ]),
-              const SizedBox(height: 24),
+    LatLng? initialPoint;
+    final lat = (existing?['lat'] as num?)?.toDouble();
+    final lng = (existing?['lng'] as num?)?.toDouble();
+    if (lat != null && lng != null) initialPoint = LatLng(lat, lng);
 
-              // Label section
-              const Text('LABEL',
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF9CA3AF),
-                      letterSpacing: 0.8)),
-              const SizedBox(height: 10),
-              Row(children: [
-                for (final l in ['Home', 'Work', 'Other']) ...[
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => setLocal(() => selectedLabel = l),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 180),
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        decoration: BoxDecoration(
-                          color: selectedLabel == l
-                              ? _labelTheme(l).fg.withAlpha(20)
-                              : _kSurface,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: selectedLabel == l
-                                ? _labelTheme(l).fg
-                                : Colors.transparent,
-                            width: 1.5,
-                          ),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(_labelTheme(l).icon,
-                                color: selectedLabel == l
-                                    ? _labelTheme(l).fg
-                                    : Colors.grey,
-                                size: 20),
-                            const SizedBox(height: 4),
-                            Text(l,
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                    color: selectedLabel == l
-                                        ? _labelTheme(l).fg
-                                        : const Color(0xFF9CA3AF))),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (l != 'Other') const SizedBox(width: 8),
-                ],
-              ]),
-              if (selectedLabel == 'Other' ||
-                  (!['Home', 'Work', 'Other'].contains(selectedLabel))) ...[
-                const SizedBox(height: 10),
-                TextField(
-                  controller: customLabelCtrl,
-                  onChanged: (v) =>
-                      setLocal(() => selectedLabel = v.isEmpty ? 'Other' : v),
-                  decoration: InputDecoration(
-                    hintText: 'e.g. Parents, School…',
-                    filled: true,
-                    fillColor: _kSurface,
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none),
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 12),
-                  ),
-                ),
-              ],
-
-              const SizedBox(height: 20),
-
-              // Address field
-              const Text('FULL ADDRESS',
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF9CA3AF),
-                      letterSpacing: 0.8)),
-              const SizedBox(height: 10),
-              TextField(
-                controller: addrCtrl,
-                autofocus: !isEditing,
-                minLines: 2,
-                maxLines: 4,
-                decoration: InputDecoration(
-                  hintText: 'House no., street, barangay, city',
-                  filled: true,
-                  fillColor: _kSurface,
-                  prefixIcon: const Padding(
-                    padding: EdgeInsets.only(left: 14, right: 10, top: 14),
-                    child: Icon(Icons.location_on_rounded,
-                        color: _kPrimary, size: 20),
-                  ),
-                  prefixIconConstraints:
-                      const BoxConstraints(minWidth: 0, minHeight: 0),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide.none),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide:
-                        const BorderSide(color: _kPrimary, width: 1.5),
-                  ),
-                  contentPadding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-                ),
-              ),
-
-              const SizedBox(height: 24),
-
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: FilledButton(
-                  onPressed: () async {
-                    final addr = addrCtrl.text.trim();
-                    if (addr.isEmpty) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                          content: Text('Address cannot be empty.')));
-                      return;
-                    }
-                    final label =
-                        selectedLabel.isEmpty ? 'Home' : selectedLabel;
-                    final user = _supabase.auth.currentUser;
-                    if (user == null) return;
-                    if (isEditing) {
-                      await _supabase
-                          .from('delivery_addresses')
-                          .update({'label': label, 'address': addr})
-                          .eq('id', existing['id']);
-                    } else {
-                      final isFirst = _addresses.isEmpty;
-                      await _supabase.from('delivery_addresses').insert({
-                        'user_id': user.id,
-                        'label': label,
-                        'address': addr,
-                        'is_default': isFirst,
-                      });
-                      if (isFirst) {
-                        await _supabase
-                            .from('profile')
-                            .update({'delivery_address': addr})
-                            .eq('user_id', user.id);
-                      }
-                    }
-                    if (ctx.mounted) Navigator.pop(ctx);
-                    await _load();
-                  },
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _kPrimary,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
-                  ),
-                  child: Text(
-                    isEditing ? 'Save Changes' : 'Add Address',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w700, fontSize: 15),
-                  ),
-                ),
-              ),
-            ],
-          ),
+    final result = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PickLocationPage(
+          initialPoint: initialPoint,
+          initialLabel: existing?['label']?.toString(),
+          initialAddress: existing?['address']?.toString(),
+          title: existing == null ? 'Set Delivery Location' : 'Edit Address',
         ),
       ),
     );
-    addrCtrl.dispose();
-    customLabelCtrl.dispose();
+
+    if (result == null) return;
+    final payload = <String, dynamic>{
+      'label': result['label'],
+      'address': result['address'],
+      'lat': result['lat'],
+      'lng': result['lng'],
+    };
+
+    try {
+      if (existing != null) {
+        await _supabase
+            .from('delivery_addresses')
+            .update(payload)
+            .eq('id', existing['id']);
+      } else {
+        final isFirst = _addresses.isEmpty;
+        await _supabase.from('delivery_addresses').insert({
+          'user_id': user.id,
+          ...payload,
+          'is_default': isFirst,
+        });
+        if (isFirst) {
+          await _supabase
+              .from('profile')
+              .update({'delivery_address': result['address']})
+              .eq('user_id', user.id);
+        }
+      }
+      await _load();
+    } on PostgrestException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Save failed: ${e.message}')),
+        );
+      }
+    }
   }
 
   @override
@@ -434,7 +264,7 @@ class _AddressesPageState extends State<AddressesPage> {
             )
           else if (_addresses.isEmpty)
             SliverFillRemaining(
-              child: _EmptyState(onAdd: () => _showAddEditSheet()),
+              child: _EmptyState(onAdd: _openMapPicker),
             )
           else ...[
             SliverPadding(
@@ -454,11 +284,11 @@ class _AddressesPageState extends State<AddressesPage> {
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 110),
               sliver: SliverList.separated(
                 itemCount: _addresses.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                separatorBuilder: (_, _) => const SizedBox(height: 12),
                 itemBuilder: (_, i) => _AddressCard(
                   address: _addresses[i],
                   onSetDefault: () => _setDefault(_addresses[i]['id']),
-                  onEdit: () => _showAddEditSheet(existing: _addresses[i]),
+                  onEdit: () => _openMapPicker(existing: _addresses[i]),
                   onDelete: () => _delete(_addresses[i]['id']),
                 ),
               ),
@@ -469,12 +299,12 @@ class _AddressesPageState extends State<AddressesPage> {
       floatingActionButton: _isLoading
           ? null
           : FloatingActionButton.extended(
-              onPressed: () => _showAddEditSheet(),
+              onPressed: _openMapPicker,
               backgroundColor: _kPrimary,
               foregroundColor: Colors.white,
               elevation: 4,
               icon: const Icon(Icons.add_location_alt_rounded),
-              label: const Text('Add Address',
+              label: const Text('Pin on Map',
                   style: TextStyle(fontWeight: FontWeight.w700)),
             ),
     );
@@ -658,6 +488,26 @@ class _AddressCard extends StatelessWidget {
                   height: 1.55),
             ),
           ),
+
+          if (address['lat'] != null && address['lng'] != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Row(
+                children: [
+                  Icon(Icons.place_rounded,
+                      size: 13, color: _kPrimary.withAlpha(180)),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Pinned on map',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: _kPrimary.withAlpha(200),
+                    ),
+                  ),
+                ],
+              ),
+            ),
 
           // Bottom action row
           Padding(

@@ -53,6 +53,13 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen>
     return int.tryParse(s?.toString() ?? '') ?? 0;
   }
 
+  int? _parseWholeNumber(String raw) {
+    final value = double.tryParse(raw.trim());
+    if (value == null) return null;
+    if (value != value.truncateToDouble()) return null;
+    return value.toInt();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -540,10 +547,13 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen>
           ElevatedButton(
             onPressed: () async {
               try {
+                final priceValue = _parseWholeNumber(priceController.text) ??
+                    ((product['price'] is num)
+                        ? (product['price'] as num).toInt()
+                        : 0);
                 await supabase.from('product').update({
                   'name': nameController.text,
-                  'price':
-                      double.tryParse(priceController.text) ?? product['price'],
+                  'price': priceValue,
                   'stock_quantity':
                       int.tryParse(stockController.text) ?? _stockOf(product),
                 }).eq('id', product['id'].toString());

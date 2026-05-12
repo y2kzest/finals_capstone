@@ -7,6 +7,8 @@ import 'pages/login_page.dart';
 import 'pages/orders_page.dart';
 import 'pages/addresses_page.dart';
 import 'pages/buyer_messages_page.dart';
+import 'pages/wishlist_page.dart';
+import 'pages/market_map_page.dart';
 import 'seller_pages/dashboard_screen.dart';
 import 'seller_pages/activate.dart';
 
@@ -31,6 +33,7 @@ class _ProfileState extends State<Profile> {
   bool _isSeller = false;
   int _orderCount = 0;
   int _activeOrderCount = 0; // orders with status pending/accepted/ready
+  int _wishlistCount = 0;
 
   @override
   void initState() {
@@ -73,7 +76,9 @@ class _ProfileState extends State<Profile> {
           .maybeSingle();
       if (sellerProfile != null) {
         _isSeller = true;
-        _sellerStatus = sellerProfile['approval_status']?.toString().toLowerCase() ?? 'pending';
+        _sellerStatus =
+            sellerProfile['approval_status']?.toString().toLowerCase() ??
+            'pending';
       }
     } catch (_) {
       // Non-critical — leave defaults
@@ -88,14 +93,23 @@ class _ProfileState extends State<Profile> {
       if (mounted) setState(() => _orderCount = (orderRes as List).length);
     } catch (_) {}
 
-    // Fetch active orders (pending/accepted/ready) for badge
+    // Fetch wishlist count
+    try {
+      final wishlistRes = await supabase
+          .from('wishlist')
+          .select('id')
+          .eq('user_id', user.id);
+      if (mounted)
+        setState(() => _wishlistCount = (wishlistRes as List).length);
+    } catch (_) {}
     try {
       final activeRes = await supabase
           .from('orders')
           .select('id')
           .eq('buyer_id', user.id)
           .inFilter('status', ['pending', 'accepted', 'ready']);
-      if (mounted) setState(() => _activeOrderCount = (activeRes as List).length);
+      if (mounted)
+        setState(() => _activeOrderCount = (activeRes as List).length);
     } catch (_) {}
 
     try {
@@ -221,11 +235,13 @@ class _ProfileState extends State<Profile> {
 
     if (mounted) setState(() => _isUploadingAvatar = true);
     try {
-      await supabase.storage.from('avatars').uploadBinary(
-        uploadPath,
-        bytes,
-        fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
-      );
+      await supabase.storage
+          .from('avatars')
+          .uploadBinary(
+            uploadPath,
+            bytes,
+            fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
+          );
 
       // Append cache-bust timestamp so the widget re-renders with the new image
       final publicUrl =
@@ -321,14 +337,11 @@ class _ProfileState extends State<Profile> {
         : newValue;
 
     try {
-      await supabase.from('profile').upsert(
-        {
-          'user_id': userId,
-          'email': _userEmail,
-          key: dbValue,
-        },
-        onConflict: 'user_id',
-      );
+      await supabase.from('profile').upsert({
+        'user_id': userId,
+        'email': _userEmail,
+        key: dbValue,
+      }, onConflict: 'user_id');
 
       if (mounted) {
         setState(() {
@@ -488,18 +501,17 @@ class _ProfileState extends State<Profile> {
   Future<void> _contactAdmin() async {
     final user = supabase.auth.currentUser;
     if (user == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please log in first.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please log in first.')));
       return;
     }
 
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const Center(
-        child: CircularProgressIndicator(color: kDeepBlue),
-      ),
+      builder: (_) =>
+          const Center(child: CircularProgressIndicator(color: kDeepBlue)),
     );
 
     try {
@@ -611,7 +623,10 @@ class _ProfileState extends State<Profile> {
                     right: -8,
                     top: -6,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: const Color(0xFFDC2626),
                         borderRadius: BorderRadius.circular(20),
@@ -678,22 +693,27 @@ class _ProfileState extends State<Profile> {
                       shape: BoxShape.circle,
                       border: Border.all(color: Colors.white, width: 2.5),
                     ),
-                    child: Builder(builder: (_) {
-                      final avatarUrl =
-                          _profileData?['avatar_url']?.toString();
-                      return CircleAvatar(
-                        radius: 34,
-                        backgroundColor: Colors.white24,
-                        backgroundImage:
-                            avatarUrl != null && avatarUrl.isNotEmpty
-                                ? NetworkImage(avatarUrl)
-                                : null,
-                        child: avatarUrl == null || avatarUrl.isEmpty
-                            ? const Icon(Icons.person,
-                                size: 42, color: Colors.white)
-                            : null,
-                      );
-                    }),
+                    child: Builder(
+                      builder: (_) {
+                        final avatarUrl = _profileData?['avatar_url']
+                            ?.toString();
+                        return CircleAvatar(
+                          radius: 34,
+                          backgroundColor: Colors.white24,
+                          backgroundImage:
+                              avatarUrl != null && avatarUrl.isNotEmpty
+                              ? NetworkImage(avatarUrl)
+                              : null,
+                          child: avatarUrl == null || avatarUrl.isEmpty
+                              ? const Icon(
+                                  Icons.person,
+                                  size: 42,
+                                  color: Colors.white,
+                                )
+                              : null,
+                        );
+                      },
+                    ),
                   ),
                   Positioned(
                     bottom: 0,
@@ -712,7 +732,9 @@ class _ProfileState extends State<Profile> {
                                 width: 14,
                                 height: 14,
                                 child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: kDeepBlue),
+                                  strokeWidth: 2,
+                                  color: kDeepBlue,
+                                ),
                               )
                             : const Icon(
                                 Icons.camera_alt,
@@ -729,6 +751,26 @@ class _ProfileState extends State<Profile> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.16),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: const Text(
+                        'BUYER PROFILE',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     Text(
                       name,
                       maxLines: 1,
@@ -759,7 +801,11 @@ class _ProfileState extends State<Profile> {
                 },
                 style: TextButton.styleFrom(
                   foregroundColor: Colors.white,
-                  backgroundColor: Colors.white24,
+                  backgroundColor: Colors.white.withValues(alpha: 0.18),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(999),
                   ),
@@ -774,82 +820,42 @@ class _ProfileState extends State<Profile> {
           ),
           const SizedBox(height: 14),
           Container(
-            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(14),
+              color: Colors.white.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(16),
             ),
             child: Row(
               children: [
                 Expanded(
-                  child: InkWell(
+                  child: _ProfileStatTile(
+                    icon: Icons.receipt_long_rounded,
+                    value: '$_orderCount',
+                    label: 'Orders',
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(builder: (_) => const OrdersPage()),
                     ),
-                    child: Column(
-                      children: [
-                        Text(
-                          '$_orderCount',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 18,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        const Text(
-                          'Orders',
-                          style: TextStyle(color: Colors.white70, fontSize: 12),
-                        ),
-                      ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _ProfileStatTile(
+                    icon: Icons.favorite_border_rounded,
+                    value: '$_wishlistCount',
+                    label: 'Wishlist',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const WishlistPage()),
                     ),
                   ),
                 ),
-                Container(width: 1, height: 28, color: Colors.white24),
+                const SizedBox(width: 8),
                 Expanded(
-                  child: InkWell(
+                  child: _ProfileStatTile(
+                    icon: Icons.local_offer_outlined,
+                    value: '0',
+                    label: 'Vouchers',
                     onTap: null,
-                    child: const Column(
-                      children: [
-                        Text(
-                          '0',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 18,
-                          ),
-                        ),
-                        SizedBox(height: 2),
-                        Text(
-                          'Wishlist',
-                          style: TextStyle(color: Colors.white70, fontSize: 12),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                Container(width: 1, height: 28, color: Colors.white24),
-                Expanded(
-                  child: InkWell(
-                    onTap: null,
-                    child: const Column(
-                      children: [
-                        Text(
-                          '0',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 18,
-                          ),
-                        ),
-                        SizedBox(height: 2),
-                        Text(
-                          'Vouchers',
-                          style: TextStyle(color: Colors.white70, fontSize: 12),
-                        ),
-                      ],
-                    ),
                   ),
                 ),
               ],
@@ -1037,7 +1043,11 @@ class _ProfileState extends State<Profile> {
           ),
           child: const Row(
             children: [
-              Icon(Icons.hourglass_top_rounded, color: Color(0xFF7A4A00), size: 24),
+              Icon(
+                Icons.hourglass_top_rounded,
+                color: Color(0xFF7A4A00),
+                size: 24,
+              ),
               SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -1098,7 +1108,11 @@ class _ProfileState extends State<Profile> {
                   color: kDeepBlue.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.storefront_outlined, color: kDeepBlue, size: 24),
+                child: const Icon(
+                  Icons.storefront_outlined,
+                  color: kDeepBlue,
+                  size: 24,
+                ),
               ),
               const SizedBox(width: 12),
               const Expanded(
@@ -1161,7 +1175,6 @@ class _ProfileState extends State<Profile> {
                       ),
                     ),
                   ),
-
                 ],
               ),
               const SizedBox(height: 12),
@@ -1199,16 +1212,23 @@ class _ProfileState extends State<Profile> {
                       label: 'Addresses',
                       onTap: () => Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const AddressesPage()),
+                        MaterialPageRoute(
+                          builder: (_) => const AddressesPage(),
+                        ),
                       ),
                     ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: _buildQuickActionTile(
-                      icon: Icons.discount_outlined,
-                      label: 'Vouchers',
-                      onTap: () {},
+                      icon: Icons.map_outlined,
+                      label: 'Market Map',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const MarketMapPage(),
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -1288,6 +1308,58 @@ class _ProfileState extends State<Profile> {
                   'Log Out',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                 ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfileStatTile extends StatelessWidget {
+  final IconData icon;
+  final String value;
+  final String label;
+  final VoidCallback? onTap;
+
+  const _ProfileStatTile({
+    required this.icon,
+    required this.value,
+    required this.label,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+          ),
+          child: Column(
+            children: [
+              Icon(icon, color: Colors.white, size: 16),
+              const SizedBox(height: 6),
+              Text(
+                value,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 18,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
               ),
             ],
           ),

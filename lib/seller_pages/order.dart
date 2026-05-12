@@ -1,7 +1,11 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+
+import '../utils/delivery_route_preview.dart';
+import '../utils/market_geo.dart';
 
 const Color _kPrimary = Color(0xFF2A4BA0);
 const Color _kSurface = Color(0xFFF5F6FB);
@@ -218,6 +222,8 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
       if (order != null) {
         final buyerId = order['buyer_id']?.toString();
         final productName = order['product_name']?.toString() ?? 'Your order';
+        final isDeliveryOrder =
+            (order['order_type']?.toString() ?? 'pickup') == 'delivery';
         if (buyerId != null && buyerId.isNotEmpty) {
           String title;
           String message;
@@ -229,13 +235,22 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
               type = 'order_accepted';
               break;
             case 'ready':
-              title = 'Order Ready!';
-              message = '$productName is ready for pickup.';
-              type = 'order_ready';
+              if (isDeliveryOrder) {
+                title = 'Out for Delivery!';
+                message =
+                    '$productName is on the way. The rider should arrive shortly.';
+                type = 'order_out_for_delivery';
+              } else {
+                title = 'Order Ready!';
+                message = '$productName is ready for pickup.';
+                type = 'order_ready';
+              }
               break;
             case 'completed':
-              title = 'Order Completed';
-              message = '$productName has been marked as completed.';
+              title = isDeliveryOrder ? 'Order Delivered' : 'Order Completed';
+              message = isDeliveryOrder
+                  ? '$productName has been delivered. Enjoy!'
+                  : '$productName has been marked as completed.';
               type = 'order_completed';
               break;
             default:
@@ -733,6 +748,10 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     final deliveryAddress = o['delivery_address']?.toString() ?? '';
     final isDelivery = orderType == 'delivery';
     final pickupTime = o['pickup_time']?.toString() ?? '';
+    final deliveryLat = (o['delivery_lat'] as num?)?.toDouble();
+    final deliveryLng = (o['delivery_lng'] as num?)?.toDouble();
+    final storeLat = (o['store_lat'] as num?)?.toDouble();
+    final storeLng = (o['store_lng'] as num?)?.toDouble();
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -841,25 +860,95 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
           ),
           if (isDelivery && deliveryAddress.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
                   color: const Color(0xFF0891B2).withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFF0891B2).withValues(alpha: 0.2)),
+                  border: Border.all(
+                      color: const Color(0xFF0891B2).withValues(alpha: 0.2)),
                 ),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.location_on_rounded, size: 14, color: Color(0xFF0891B2)),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        deliveryAddress,
-                        style: const TextStyle(fontSize: 12, color: Color(0xFF374151), height: 1.4),
-                      ),
+                    Row(
+                      children: [
+                        const Icon(Icons.location_on_rounded,
+                            size: 14, color: Color(0xFF0891B2)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            deliveryAddress,
+                            style: const TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF374151),
+                                height: 1.4),
+                          ),
+                        ),
+                      ],
                     ),
+                    if (deliveryLat != null && deliveryLng != null) ...[
+                      const SizedBox(height: 10),
+                      DeliveryRoutePreview(
+                        height: 140,
+                        shops: storeLat != null && storeLng != null
+                            ? [
+                                StallPoint(
+                                  name: 'Your stall',
+                                  point: LatLng(storeLat, storeLng),
+                                ),
+                              ]
+                            : const [],
+                        buyer: LatLng(deliveryLat, deliveryLng),
+                      ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 38,
+                        child: ElevatedButton.icon(
+                          onPressed: () async {
+                            final ok = await launchExternalNavigation(
+                              LatLng(deliveryLat, deliveryLng),
+                              label: 'Buyer delivery',
+                            );
+                            if (!ok && mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Could not open a maps app.'),
+                                ),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.navigation_rounded, size: 16),
+                          label: const Text(
+                            'Navigate to Buyer',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w700, fontSize: 13),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF0891B2),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ] else
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6, left: 22),
+                        child: Text(
+                          'Buyer has no map pin for this order.',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontStyle: FontStyle.italic,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -999,7 +1088,10 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                     elevation: 0,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  child: const Text('Mark Ready for Pickup', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                  child: Text(
+                    isDelivery ? 'Send Out for Delivery' : 'Mark Ready for Pickup',
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                  ),
                 ),
               ),
             ),
@@ -1007,26 +1099,59 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
             const Divider(height: 1, indent: 16, endIndent: 16),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: SizedBox(
+              child: isDelivery
+                  ? SizedBox(
+                      width: double.infinity,
                       height: 40,
                       child: ElevatedButton.icon(
-                        onPressed: () => _showVerifyPickupDialog(orderId, o),
-                        icon: const Icon(Icons.qr_code_scanner_rounded, size: 18),
-                        label: const Text('Verify Pickup', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                        onPressed: () => _updateStatus(orderId, 'completed', o),
+                        icon: const Icon(Icons.check_circle_rounded, size: 18),
+                        label: const Text(
+                          'Mark as Delivered',
+                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                        ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: _kPurple,
+                          backgroundColor: _kGreen,
                           foregroundColor: Colors.white,
                           elevation: 0,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
                       ),
+                    )
+                  : Row(
+                      children: [
+                        Expanded(
+                          child: SizedBox(
+                            height: 40,
+                            child: ElevatedButton.icon(
+                              onPressed: () =>
+                                  _showVerifyPickupDialog(orderId, o),
+                              icon: const Icon(
+                                Icons.qr_code_scanner_rounded,
+                                size: 18,
+                              ),
+                              label: const Text(
+                                'Verify Pickup',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _kPurple,
+                                foregroundColor: Colors.white,
+                                elevation: 0,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                ],
-              ),
             ),
           ] else
             const SizedBox(height: 14),

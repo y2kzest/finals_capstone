@@ -1,6 +1,8 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/cart_badge_service.dart';
+import '../services/pickup_preference_service.dart';
 import '../utils/helpers.dart';
 import 'addresses_page.dart';
 import 'buyer_messages_page.dart';
@@ -30,8 +32,9 @@ class _ProductViewPageState extends State<ProductViewPage> {
   String _sellerOpenTime = '05:00';
   String _sellerCloseTime = '19:00';
   String? _storeAddress;
+  double? _storeLat;
+  double? _storeLng;
   bool _sellerDeliveryEnabled = false;
-  int _cartCount = 0;
   List<Map<String, dynamic>> _reviews = [];
   double _averageRating = 0;
   bool _canWriteReview = false;
@@ -66,9 +69,10 @@ class _ProductViewPageState extends State<ProductViewPage> {
   void initState() {
     super.initState();
     _imagePageController = PageController();
+    CartBadgeService.instance.ensureInitialized();
+    PickupPreferenceService.instance.ensureInitialized();
     _fetchSellerLogo();
     _fetchReviews();
-    _loadCartCount();
     _checkWishlist();
     _refreshReviewEligibility();
   }
@@ -117,6 +121,11 @@ class _ProductViewPageState extends State<ProductViewPage> {
         await Supabase.instance.client.from('wishlist').insert({
           'user_id': user.id,
           'product_id': productId,
+          'product_name': widget.product['name']?.toString() ?? '',
+          'image_url': widget.product['image_url']?.toString() ?? '',
+          'price': _priceValue,
+          'seller_id': widget.product['seller_id']?.toString() ?? '',
+          'store_name': widget.product['store_name']?.toString() ?? '',
         });
         if (mounted) setState(() => _inWishlist = true);
       }
@@ -340,18 +349,6 @@ class _ProductViewPageState extends State<ProductViewPage> {
     commentCtrl.dispose();
   }
 
-  Future<void> _loadCartCount() async {
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) return;
-    try {
-      final res = await Supabase.instance.client
-          .from('cart')
-          .select('id')
-          .eq('buyer_id', user.id);
-      if (mounted) setState(() => _cartCount = (res as List).length);
-    } catch (_) {}
-  }
-
   Future<void> _fetchSellerLogo() async {
     final sellerId = widget.product['seller_id']?.toString();
     if (sellerId == null || sellerId.isEmpty) return;
@@ -359,7 +356,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
       final resp = await Supabase.instance.client
           .from('seller_profiles')
           .select(
-            'logo_url, is_open, opening_time, closing_time, store_address, delivery_enabled',
+            'logo_url, is_open, opening_time, closing_time, store_address, delivery_enabled, stall_lat, stall_lng',
           )
           .eq('user_id', sellerId)
           .maybeSingle();
@@ -370,6 +367,8 @@ class _ProductViewPageState extends State<ProductViewPage> {
           _sellerOpenTime = resp['opening_time']?.toString() ?? '05:00';
           _sellerCloseTime = resp['closing_time']?.toString() ?? '19:00';
           _storeAddress = resp['store_address']?.toString();
+          _storeLat = (resp['stall_lat'] as num?)?.toDouble();
+          _storeLng = (resp['stall_lng'] as num?)?.toDouble();
           _sellerDeliveryEnabled = resp['delivery_enabled'] == true;
         });
       }
@@ -559,24 +558,33 @@ class _ProductViewPageState extends State<ProductViewPage> {
 
     final productName = _displayName;
     final productId = _productId;
+    final sellerId = widget.product['seller_id']?.toString();
 
     try {
       // Check if this product is already in the cart
       Map<String, dynamic>? existing;
       if (productId != null && productId.isNotEmpty) {
-        existing = await supabase
+        var query = supabase
             .from('cart')
             .select('id, qty')
             .eq('buyer_id', user.id)
-            .eq('product_id', productId)
-            .maybeSingle();
+            .eq('product_id', productId);
+        if (sellerId != null && sellerId.isNotEmpty) {
+          query = query.eq('seller_id', sellerId);
+        }
+        existing = await query.maybeSingle();
       }
-      existing ??= await supabase
-          .from('cart')
-          .select('id, qty')
-          .eq('buyer_id', user.id)
-          .eq('product_name', productName)
-          .maybeSingle();
+      if (existing == null) {
+        var fallback = supabase
+            .from('cart')
+            .select('id, qty')
+            .eq('buyer_id', user.id)
+            .eq('product_name', productName);
+        if (sellerId != null && sellerId.isNotEmpty) {
+          fallback = fallback.eq('seller_id', sellerId);
+        }
+        existing = await fallback.maybeSingle();
+      }
 
       if (existing != null) {
         final currentQty = int.tryParse(existing['qty'].toString()) ?? 0;
@@ -601,7 +609,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
       }
 
       if (!mounted) return;
-      _loadCartCount();
+      await CartBadgeService.instance.refreshCount();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Added $_quantity $productName to cart!')),
       );
@@ -661,10 +669,17 @@ class _ProductViewPageState extends State<ProductViewPage> {
 
     final orderType = result['order_type'] as String;
     final deliveryAddress = result['delivery_address'] as String?;
+    final deliveryLat = (result['delivery_lat'] as num?)?.toDouble();
+    final deliveryLng = (result['delivery_lng'] as num?)?.toDouble();
     final newAddress = result['new_address'] as String?;
     final buyerNotes = result['buyer_notes'] as String?;
     final allowSubstitution = result['allow_substitution'] as bool? ?? false;
     final requestedWeight = result['requested_weight'] as double?;
+    final pickupTime = result['pickup_time'] as String?;
+
+    if (orderType == 'pickup' && pickupTime != null && pickupTime.isNotEmpty) {
+      await PickupPreferenceService.instance.save(pickupTime);
+    }
 
     // Save updated address back to profile if changed
     if (newAddress != null &&
@@ -713,8 +728,18 @@ class _ProductViewPageState extends State<ProductViewPage> {
             if (requestedWeight != null) 'requested_weight': requestedWeight,
             if (deliveryAddress != null && deliveryAddress.isNotEmpty)
               'delivery_address': deliveryAddress,
+            if (orderType == 'delivery' && deliveryLat != null)
+              'delivery_lat': deliveryLat,
+            if (orderType == 'delivery' && deliveryLng != null)
+              'delivery_lng': deliveryLng,
             if (_storeAddress != null && _storeAddress!.isNotEmpty)
               'store_address': _storeAddress,
+            // Snapshot stall coords so the order's map view stays stable
+            // even if the seller later moves their pin.
+            if (_storeLat != null) 'store_lat': _storeLat,
+            if (_storeLng != null) 'store_lng': _storeLng,
+            if (pickupTime != null && pickupTime.isNotEmpty)
+              'pickup_time': pickupTime,
           })
           .select('id')
           .single();
@@ -739,6 +764,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
         builder: (ctx) => _OrderSuccessDialog(
           orderType: orderType,
           address: deliveryAddress,
+          pickupTime: orderType == 'pickup' ? pickupTime : null,
           onDone: () => Navigator.of(ctx).pop(),
         ),
       );
@@ -781,6 +807,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
     bool allowSubstitution = false;
     final bool isByWeight = widget.product['is_by_weight'] == true;
     int qty = _quantity;
+    String? pickupTime = PickupPreferenceService.instance.currentValue;
 
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
@@ -790,425 +817,492 @@ class _ProductViewPageState extends State<ProductViewPage> {
         return StatefulBuilder(
           builder: (ctx, setModal) {
             final total = _priceValue * qty;
-            return Container(
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-              ),
-              padding: EdgeInsets.only(
-                left: 20,
-                right: 20,
-                top: 20,
-                bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Drag handle
-                    Center(
-                      child: Container(
-                        width: 40,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFD1D5DB),
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Confirm Order',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
-                        color: Color(0xFF111827),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    // Product summary row
-                    Row(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: SizedBox(
-                            width: 68,
-                            height: 68,
-                            child: _buildSheetThumb(),
+            return Listener(
+              onPointerDown: (_) =>
+                  FocusManager.instance.primaryFocus?.unfocus(),
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+                padding: EdgeInsets.only(
+                  left: 20,
+                  right: 20,
+                  top: 20,
+                  bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Drag handle
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFD1D5DB),
+                            borderRadius: BorderRadius.circular(2),
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _displayName,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFF111827),
-                                ),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Confirm Order',
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF111827),
                               ),
-                              const SizedBox(height: 3),
-                              Text(
-                                _sellerName,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: Color(0xFF6B7280),
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () {
+                              FocusScope.of(context).unfocus();
+                              Navigator.of(ctx).pop();
+                            },
+                            icon: const Icon(
+                              Icons.close_rounded,
+                              color: Color(0xFF6B7280),
+                            ),
+                            tooltip: 'Close',
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      // Product summary row
+                      Row(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: SizedBox(
+                              width: 68,
+                              height: 68,
+                              child: _buildSheetThumb(),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _displayName,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF111827),
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  _sellerName,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Color(0xFF6B7280),
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '\u20b1${_formatPrice(_priceValue)}/$_unitType',
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w800,
+                                    color: Color(0xFF153075),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // Qty stepper
+                          Column(
+                            children: [
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF1F4FC),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _sheetQtyBtn(Icons.remove, () {
+                                      if (qty > 1) setModal(() => qty--);
+                                    }),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                      ),
+                                      child: Text(
+                                        '$qty',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ),
+                                    _sheetQtyBtn(
+                                      Icons.add,
+                                      () => setModal(() => qty++),
+                                    ),
+                                  ],
                                 ),
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                '\u20b1${_formatPrice(_priceValue)}/$_unitType',
+                                '\u20b1${_formatPrice(total)}',
                                 style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w800,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
                                   color: Color(0xFF153075),
                                 ),
                               ),
                             ],
                           ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      const Divider(height: 1, color: Color(0xFFE5E7F0)),
+                      const SizedBox(height: 14),
+                      // Fulfillment section
+                      const Text(
+                        'Fulfillment',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF374151),
                         ),
-                        // Qty stepper
-                        Column(
-                          children: [
-                            Container(
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF1F4FC),
-                                borderRadius: BorderRadius.circular(10),
+                      ),
+                      const SizedBox(height: 10),
+                      _DeliveryOptionTile(
+                        icon: Icons.storefront_rounded,
+                        title: 'Pick up at store',
+                        subtitle:
+                            _storeAddress != null && _storeAddress!.isNotEmpty
+                            ? _storeAddress!
+                            : 'Collect your order from the seller',
+                        selected: selected == 'pickup',
+                        onTap: () => setModal(() => selected = 'pickup'),
+                      ),
+                      if (selected == 'pickup') ...[
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Preferred Pickup Time',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF374151),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        GestureDetector(
+                          onTap: () async {
+                            final now = TimeOfDay.now();
+                            final initialTime = pickupTime != null
+                                ? _parsePickupTime(pickupTime!)
+                                : now;
+                            // Capture context before async gap
+                            final rootContext = context;
+                            if (!mounted) return;
+                            final picked = await showTimePicker(
+                              context: rootContext,
+                              initialTime: initialTime,
+                              builder: (context, child) => MediaQuery(
+                                data: MediaQuery.of(
+                                  context,
+                                ).copyWith(alwaysUse24HourFormat: false),
+                                child: child!,
                               ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  _sheetQtyBtn(Icons.remove, () {
-                                    if (qty > 1) setModal(() => qty--);
-                                  }),
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                    ),
-                                    child: Text(
-                                      '$qty',
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w800,
-                                        fontSize: 14,
-                                      ),
-                                    ),
-                                  ),
-                                  _sheetQtyBtn(
-                                    Icons.add,
-                                    () => setModal(() => qty++),
-                                  ),
-                                ],
+                            );
+                            // Guard: sheet may have been dismissed while picker was open
+                            if (picked == null || !mounted) return;
+                            setModal(() {
+                              final hour = picked.hourOfPeriod == 0
+                                  ? 12
+                                  : picked.hourOfPeriod;
+                              final minute = picked.minute.toString().padLeft(
+                                2,
+                                '0',
+                              );
+                              final period = picked.period == DayPeriod.am
+                                  ? 'AM'
+                                  : 'PM';
+                              pickupTime = '$hour:$minute $period';
+                            });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
+                            ),
+                            decoration: BoxDecoration(
+                              color: pickupTime != null
+                                  ? const Color(0xFF2A4BA0).withAlpha(15)
+                                  : const Color(0xFFF1F4FC),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: pickupTime != null
+                                    ? const Color(0xFF2A4BA0)
+                                    : const Color(0xFFD1D5DB),
                               ),
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '\u20b1${_formatPrice(total)}',
-                              style: const TextStyle(
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.access_time_rounded,
+                                  size: 18,
+                                  color: pickupTime != null
+                                      ? const Color(0xFF2A4BA0)
+                                      : const Color(0xFF9CA3AF),
+                                ),
+                                const SizedBox(width: 10),
+                                Text(
+                                  pickupTime ?? 'Tap to choose a time',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: pickupTime != null
+                                        ? FontWeight.w700
+                                        : FontWeight.w400,
+                                    color: pickupTime != null
+                                        ? const Color(0xFF1F2937)
+                                        : const Color(0xFF9CA3AF),
+                                  ),
+                                ),
+                                const Spacer(),
+                                Icon(
+                                  Icons.chevron_right_rounded,
+                                  size: 18,
+                                  color: pickupTime != null
+                                      ? const Color(0xFF2A4BA0)
+                                      : const Color(0xFF9CA3AF),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (_sellerDeliveryEnabled) ...[
+                        const SizedBox(height: 8),
+                        _DeliveryOptionTile(
+                          icon: Icons.delivery_dining_rounded,
+                          title: 'Delivery',
+                          subtitle: 'Delivered to your address',
+                          selected: selected == 'delivery',
+                          onTap: () => setModal(() => selected = 'delivery'),
+                        ),
+                        if (selected == 'delivery') ...[
+                          const SizedBox(height: 12),
+                          // Saved address tiles
+                          if (savedAddresses.isNotEmpty) ...[
+                            const Text(
+                              'Select address',
+                              style: TextStyle(
                                 fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF153075),
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF374151),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            ...savedAddresses.map((a) {
+                              final id = a['id']?.toString();
+                              final isChosen = selectedAddrId == id;
+                              return GestureDetector(
+                                onTap: () => setModal(() {
+                                  selectedAddrId = id;
+                                  showCustomField = false;
+                                }),
+                                child: Container(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: isChosen
+                                        ? const Color(0xFF2A4BA0).withAlpha(12)
+                                        : Colors.white,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: isChosen
+                                          ? const Color(0xFF2A4BA0)
+                                          : Colors.grey.shade300,
+                                      width: isChosen ? 1.5 : 1,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        a['label'] == 'Work'
+                                            ? Icons.work_outline_rounded
+                                            : Icons.home_outlined,
+                                        color: isChosen
+                                            ? const Color(0xFF2A4BA0)
+                                            : Colors.grey,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Text(
+                                                  a['label']?.toString() ??
+                                                      'Home',
+                                                  style: TextStyle(
+                                                    fontWeight: FontWeight.w700,
+                                                    fontSize: 13,
+                                                    color: isChosen
+                                                        ? const Color(
+                                                            0xFF2A4BA0,
+                                                          )
+                                                        : const Color(
+                                                            0xFF111827,
+                                                          ),
+                                                  ),
+                                                ),
+                                                if (a['is_default'] ==
+                                                    true) ...[
+                                                  const SizedBox(width: 6),
+                                                  Container(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 6,
+                                                          vertical: 1,
+                                                        ),
+                                                    decoration: BoxDecoration(
+                                                      color: const Color(
+                                                        0xFF2A4BA0,
+                                                      ).withAlpha(20),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            20,
+                                                          ),
+                                                    ),
+                                                    child: const Text(
+                                                      'Default',
+                                                      style: TextStyle(
+                                                        fontSize: 10,
+                                                        color: Color(
+                                                          0xFF2A4BA0,
+                                                        ),
+                                                        fontWeight:
+                                                            FontWeight.w700,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ],
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              a['address']?.toString() ?? '',
+                                              style: const TextStyle(
+                                                fontSize: 12,
+                                                color: Color(0xFF6B7280),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      if (isChosen)
+                                        const Icon(
+                                          Icons.check_circle_rounded,
+                                          color: Color(0xFF2A4BA0),
+                                          size: 20,
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }),
+                            TextButton.icon(
+                              onPressed: () => setModal(() {
+                                selectedAddrId = null;
+                                showCustomField = true;
+                              }),
+                              icon: const Icon(
+                                Icons.add_location_alt_outlined,
+                                size: 16,
+                              ),
+                              label: const Text('Use a different address'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: const Color(0xFF2A4BA0),
+                                padding: EdgeInsets.zero,
                               ),
                             ),
                           ],
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    const Divider(height: 1, color: Color(0xFFE5E7F0)),
-                    const SizedBox(height: 14),
-                    // Fulfillment section
-                    const Text(
-                      'Fulfillment',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF374151),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    _DeliveryOptionTile(
-                      icon: Icons.storefront_rounded,
-                      title: 'Pick up at store',
-                      subtitle:
-                          _storeAddress != null && _storeAddress!.isNotEmpty
-                          ? _storeAddress!
-                          : 'Collect your order from the seller',
-                      selected: selected == 'pickup',
-                      onTap: () => setModal(() => selected = 'pickup'),
-                    ),
-                    if (_sellerDeliveryEnabled) ...[
-                      const SizedBox(height: 8),
-                      _DeliveryOptionTile(
-                        icon: Icons.delivery_dining_rounded,
-                        title: 'Delivery',
-                        subtitle: 'Delivered to your address',
-                        selected: selected == 'delivery',
-                        onTap: () => setModal(() => selected = 'delivery'),
-                      ),
-                      if (selected == 'delivery') ...[
-                        const SizedBox(height: 12),
-                        // Saved address tiles
-                        if (savedAddresses.isNotEmpty) ...[
-                          const Text(
-                            'Select address',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: Color(0xFF374151),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          ...savedAddresses.map((a) {
-                            final id = a['id']?.toString();
-                            final isChosen = selectedAddrId == id;
-                            return GestureDetector(
-                              onTap: () => setModal(() {
-                                selectedAddrId = id;
-                                showCustomField = false;
-                              }),
-                              child: Container(
-                                margin: const EdgeInsets.only(bottom: 8),
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: isChosen
-                                      ? const Color(0xFF2A4BA0).withAlpha(12)
-                                      : Colors.white,
+                          if (showCustomField || savedAddresses.isEmpty) ...[
+                            if (savedAddresses.isNotEmpty)
+                              const SizedBox(height: 4),
+                            TextField(
+                              controller: addrCtrl,
+                              autofocus: savedAddresses.isEmpty,
+                              decoration: InputDecoration(
+                                labelText: 'Delivery Address',
+                                hintText: 'House no., street, barangay, city',
+                                prefixIcon: const Icon(
+                                  Icons.location_on_outlined,
+                                ),
+                                border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: isChosen
-                                        ? const Color(0xFF2A4BA0)
-                                        : Colors.grey.shade300,
-                                    width: isChosen ? 1.5 : 1,
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 12,
+                                ),
+                              ),
+                              minLines: 1,
+                              maxLines: 3,
+                            ),
+                          ],
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: () async {
+                                Navigator.pop(ctx);
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const AddressesPage(),
                                   ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      a['label'] == 'Work'
-                                          ? Icons.work_outline_rounded
-                                          : Icons.home_outlined,
-                                      color: isChosen
-                                          ? const Color(0xFF2A4BA0)
-                                          : Colors.grey,
-                                      size: 20,
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              Text(
-                                                a['label']?.toString() ??
-                                                    'Home',
-                                                style: TextStyle(
-                                                  fontWeight: FontWeight.w700,
-                                                  fontSize: 13,
-                                                  color: isChosen
-                                                      ? const Color(0xFF2A4BA0)
-                                                      : const Color(0xFF111827),
-                                                ),
-                                              ),
-                                              if (a['is_default'] == true) ...[
-                                                const SizedBox(width: 6),
-                                                Container(
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 6,
-                                                        vertical: 1,
-                                                      ),
-                                                  decoration: BoxDecoration(
-                                                    color: const Color(
-                                                      0xFF2A4BA0,
-                                                    ).withAlpha(20),
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          20,
-                                                        ),
-                                                  ),
-                                                  child: const Text(
-                                                    'Default',
-                                                    style: TextStyle(
-                                                      fontSize: 10,
-                                                      color: Color(0xFF2A4BA0),
-                                                      fontWeight:
-                                                          FontWeight.w700,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ],
-                                          ),
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            a['address']?.toString() ?? '',
-                                            style: const TextStyle(
-                                              fontSize: 12,
-                                              color: Color(0xFF6B7280),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    if (isChosen)
-                                      const Icon(
-                                        Icons.check_circle_rounded,
-                                        color: Color(0xFF2A4BA0),
-                                        size: 20,
-                                      ),
-                                  ],
-                                ),
+                                );
+                              },
+                              style: TextButton.styleFrom(
+                                foregroundColor: const Color(0xFF2A4BA0),
+                                padding: EdgeInsets.zero,
                               ),
-                            );
-                          }),
-                          TextButton.icon(
-                            onPressed: () => setModal(() {
-                              selectedAddrId = null;
-                              showCustomField = true;
-                            }),
-                            icon: const Icon(
-                              Icons.add_location_alt_outlined,
-                              size: 16,
-                            ),
-                            label: const Text('Use a different address'),
-                            style: TextButton.styleFrom(
-                              foregroundColor: const Color(0xFF2A4BA0),
-                              padding: EdgeInsets.zero,
+                              child: const Text(
+                                'Manage addresses →',
+                                style: TextStyle(fontSize: 12),
+                              ),
                             ),
                           ),
                         ],
-                        if (showCustomField || savedAddresses.isEmpty) ...[
-                          if (savedAddresses.isNotEmpty)
-                            const SizedBox(height: 4),
-                          TextField(
-                            controller: addrCtrl,
-                            autofocus: savedAddresses.isEmpty,
-                            decoration: InputDecoration(
-                              labelText: 'Delivery Address',
-                              hintText: 'House no., street, barangay, city',
-                              prefixIcon: const Icon(
-                                Icons.location_on_outlined,
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 12,
-                              ),
-                            ),
-                            minLines: 1,
-                            maxLines: 3,
-                          ),
-                        ],
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: TextButton(
-                            onPressed: () async {
-                              Navigator.pop(ctx);
-                              await Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const AddressesPage(),
-                                ),
-                              );
-                            },
-                            style: TextButton.styleFrom(
-                              foregroundColor: const Color(0xFF2A4BA0),
-                              padding: EdgeInsets.zero,
-                            ),
-                            child: const Text(
-                              'Manage addresses →',
-                              style: TextStyle(fontSize: 12),
-                            ),
-                          ),
-                        ),
                       ],
-                    ],
-                    const SizedBox(height: 16),
-                    const Divider(height: 1, color: Color(0xFFE5E7F0)),
-                    const SizedBox(height: 14),
-                    // ── Buyer notes & substitution ──
-                    const Text(
-                      'Special Instructions',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF374151),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: notesCtrl,
-                      maxLines: 2,
-                      decoration: InputDecoration(
-                        hintText: 'e.g. Cut into pieces, no fat, etc.',
-                        prefixIcon: const Icon(Icons.notes_rounded, size: 18),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 10,
+                      const SizedBox(height: 16),
+                      const Divider(height: 1, color: Color(0xFFE5E7F0)),
+                      const SizedBox(height: 14),
+                      // ── Buyer notes & substitution ──
+                      const Text(
+                        'Special Instructions',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF374151),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: const [
-                              Text(
-                                'Allow substitution',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF374151),
-                                ),
-                              ),
-                              SizedBox(height: 2),
-                              Text(
-                                'If item is unavailable, seller may replace with a similar product.',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Color(0xFF6B7280),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Switch(
-                          value: allowSubstitution,
-                          onChanged: (v) =>
-                              setModal(() => allowSubstitution = v),
-                          activeColor: const Color(0xFF2A4BA0),
-                        ),
-                      ],
-                    ),
-                    if (isByWeight) ...[
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 8),
                       TextField(
-                        controller: weightCtrl,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
+                        controller: notesCtrl,
+                        maxLines: 2,
                         decoration: InputDecoration(
-                          labelText: 'Requested weight (kg)',
-                          hintText: 'e.g. 0.5',
-                          prefixIcon: const Icon(
-                            Icons.scale_outlined,
-                            size: 18,
-                          ),
+                          hintText: 'e.g. Cut into pieces, no fat, etc.',
+                          prefixIcon: const Icon(Icons.notes_rounded, size: 18),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
@@ -1218,102 +1312,181 @@ class _ProductViewPageState extends State<ProductViewPage> {
                           ),
                         ),
                       ),
-                    ],
-                    const SizedBox(height: 16),
-                    const Divider(height: 1, color: Color(0xFFE5E7F0)),
-                    const SizedBox(height: 12),
-                    // Total row
-                    Row(
-                      children: [
-                        const Text(
-                          'Total',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Color(0xFF6B7280),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: const [
+                                Text(
+                                  'Allow substitution',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF374151),
+                                  ),
+                                ),
+                                SizedBox(height: 2),
+                                Text(
+                                  'If item is unavailable, seller may replace with a similar product.',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFF6B7280),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                        const Spacer(),
-                        Text(
-                          '\u20b1${_formatPrice(total)}',
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w900,
-                            color: Color(0xFF1A3C8C),
+                          Switch(
+                            value: allowSubstitution,
+                            onChanged: (v) =>
+                                setModal(() => allowSubstitution = v),
+                            activeColor: const Color(0xFF2A4BA0),
+                          ),
+                        ],
+                      ),
+                      if (isByWeight) ...[
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: weightCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration: InputDecoration(
+                            labelText: 'Requested weight (kg)',
+                            hintText: 'e.g. 0.5',
+                            prefixIcon: const Icon(
+                              Icons.scale_outlined,
+                              size: 18,
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
                           ),
                         ),
                       ],
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 50,
-                      child: ElevatedButton(
-                        onPressed: () {
-                          if (selected == 'delivery') {
-                            String finalAddr = '';
-                            if (selectedAddrId != null && !showCustomField) {
-                              final a = savedAddresses.firstWhere(
-                                (a) => a['id']?.toString() == selectedAddrId,
-                                orElse: () => {},
-                              );
-                              finalAddr = a['address']?.toString() ?? '';
-                            } else {
-                              finalAddr = addrCtrl.text.trim();
-                            }
-                            if (finalAddr.isEmpty) {
-                              ScaffoldMessenger.of(ctx).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'Please select or enter a delivery address.',
-                                  ),
-                                ),
-                              );
-                              return;
-                            }
-                            Navigator.pop(ctx, {
-                              'order_type': selected,
-                              'delivery_address': finalAddr,
-                              'new_address': showCustomField ? finalAddr : null,
-                              'qty': qty,
-                              'buyer_notes': notesCtrl.text.trim(),
-                              'allow_substitution': allowSubstitution,
-                              if (isByWeight)
-                                'requested_weight': double.tryParse(
-                                  weightCtrl.text.trim(),
-                                ),
-                            });
-                          } else {
-                            Navigator.pop(ctx, {
-                              'order_type': selected,
-                              'delivery_address': null,
-                              'new_address': null,
-                              'qty': qty,
-                              'buyer_notes': notesCtrl.text.trim(),
-                              'allow_substitution': allowSubstitution,
-                              if (isByWeight)
-                                'requested_weight': double.tryParse(
-                                  weightCtrl.text.trim(),
-                                ),
-                            });
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1A3C8C),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
+                      const SizedBox(height: 16),
+                      const Divider(height: 1, color: Color(0xFFE5E7F0)),
+                      const SizedBox(height: 12),
+                      // Total row
+                      Row(
+                        children: [
+                          const Text(
+                            'Total',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Color(0xFF6B7280),
+                            ),
                           ),
-                        ),
-                        child: const Text(
-                          'Place Order',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 15,
+                          const Spacer(),
+                          Text(
+                            '\u20b1${_formatPrice(total)}',
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w900,
+                              color: Color(0xFF1A3C8C),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 50,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            if (selected == 'delivery') {
+                              String finalAddr = '';
+                              double? finalLat;
+                              double? finalLng;
+                              if (selectedAddrId != null && !showCustomField) {
+                                final a = savedAddresses.firstWhere(
+                                  (a) => a['id']?.toString() == selectedAddrId,
+                                  orElse: () => {},
+                                );
+                                finalAddr = a['address']?.toString() ?? '';
+                                finalLat = (a['lat'] as num?)?.toDouble();
+                                finalLng = (a['lng'] as num?)?.toDouble();
+                              } else {
+                                finalAddr = addrCtrl.text.trim();
+                              }
+                              if (finalAddr.isEmpty) {
+                                ScaffoldMessenger.of(ctx).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Please select or enter a delivery address.',
+                                    ),
+                                  ),
+                                );
+                                return;
+                              }
+                              if (finalLat == null || finalLng == null) {
+                                ScaffoldMessenger.of(ctx).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'This address has no map pin. Open Profile → Addresses → Pin on Map first.',
+                                    ),
+                                    duration: Duration(seconds: 4),
+                                  ),
+                                );
+                                return;
+                              }
+                              Navigator.pop(ctx, {
+                                'order_type': selected,
+                                'delivery_address': finalAddr,
+                                'delivery_lat': finalLat,
+                                'delivery_lng': finalLng,
+                                'new_address': showCustomField
+                                    ? finalAddr
+                                    : null,
+                                'qty': qty,
+                                'buyer_notes': notesCtrl.text.trim(),
+                                'allow_substitution': allowSubstitution,
+                                if (isByWeight)
+                                  'requested_weight': double.tryParse(
+                                    weightCtrl.text.trim(),
+                                  ),
+                              });
+                            } else {
+                              Navigator.pop(ctx, {
+                                'order_type': selected,
+                                'delivery_address': null,
+                                'new_address': null,
+                                'qty': qty,
+                                'buyer_notes': notesCtrl.text.trim(),
+                                'allow_substitution': allowSubstitution,
+                                if (pickupTime != null)
+                                  'pickup_time': pickupTime,
+                                if (isByWeight)
+                                  'requested_weight': double.tryParse(
+                                    weightCtrl.text.trim(),
+                                  ),
+                              });
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF1A3C8C),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          child: const Text(
+                            'Place Order',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             );
@@ -1322,13 +1495,41 @@ class _ProductViewPageState extends State<ProductViewPage> {
       },
     );
 
-    addrCtrl.dispose();
-    notesCtrl.dispose();
-    weightCtrl.dispose();
+    if (!mounted) return result;
     if (result != null && result.containsKey('qty')) {
       setState(() => _quantity = result['qty'] as int);
     }
     return result;
+  }
+
+  /// Parses a formatted pickup time string like "1:30 PM" back to a TimeOfDay.
+  TimeOfDay _parsePickupTime(String time) {
+    final normalized = time.trim().toLowerCase();
+    if (normalized.contains('morning')) {
+      return const TimeOfDay(hour: 9, minute: 0);
+    }
+    if (normalized.contains('afternoon')) {
+      return const TimeOfDay(hour: 14, minute: 0);
+    }
+    if (normalized.contains('evening')) {
+      return const TimeOfDay(hour: 18, minute: 0);
+    }
+    if (normalized.contains('all day') || normalized.contains('tomorrow')) {
+      return const TimeOfDay(hour: 10, minute: 0);
+    }
+
+    try {
+      final parts = time.split(' ');
+      final hm = parts[0].split(':');
+      int hour = int.parse(hm[0]);
+      final minute = int.parse(hm[1]);
+      final isPm = parts.length > 1 && parts[1].toUpperCase() == 'PM';
+      if (isPm && hour != 12) hour += 12;
+      if (!isPm && hour == 12) hour = 0;
+      return TimeOfDay(hour: hour, minute: minute);
+    } catch (_) {
+      return TimeOfDay.now();
+    }
   }
 
   Widget _sheetQtyBtn(IconData icon, VoidCallback onTap) {
@@ -1377,6 +1578,88 @@ class _ProductViewPageState extends State<ProductViewPage> {
     );
   }
 
+  Widget _buildKarinderyaInfoCard() {
+    if ((widget.product['product_type'] ?? '').toString() != 'karinderya') {
+      return const SizedBox.shrink();
+    }
+
+    final pricingBasis = (widget.product['pricing_basis'] ?? '').toString();
+    final prepTime = (widget.product['prep_time'] ?? '').toString();
+    final variants = (widget.product['variants'] ?? '').toString();
+    final availableToday = widget.product['daily_available'] != false;
+
+    final details = <Widget>[
+      const Row(
+        children: [
+          Icon(Icons.restaurant_rounded, size: 16, color: Color(0xFFD4500A)),
+          SizedBox(width: 6),
+          Text(
+            'Karinderya / Cooked Food',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFFD4500A),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 10),
+    ];
+
+    if (pricingBasis.isNotEmpty) {
+      details.add(
+        _karRow(Icons.price_change_outlined, 'Pricing', pricingBasis),
+      );
+    }
+
+    if (prepTime.isNotEmpty) {
+      if (pricingBasis.isNotEmpty) {
+        details.add(const SizedBox(height: 6));
+      }
+      details.add(_karRow(Icons.schedule_rounded, 'Ready in', prepTime));
+    }
+
+    if (variants.isNotEmpty) {
+      if (pricingBasis.isNotEmpty || prepTime.isNotEmpty) {
+        details.add(const SizedBox(height: 6));
+      }
+      details.add(_karRow(Icons.tune_rounded, 'Options', variants));
+    }
+
+    details.add(const SizedBox(height: 6));
+    details.add(
+      _karRow(
+        Icons.today_rounded,
+        "Today's status",
+        availableToday ? 'Available today' : 'Not available today',
+        valueColor: availableToday
+            ? const Color(0xFF059669)
+            : const Color(0xFFDC2626),
+      ),
+    );
+
+    return Column(
+      children: [
+        const SizedBox(height: 14),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF4ED),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: const Color(0xFFFF6B35).withValues(alpha: 0.3),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: details,
+          ),
+        ),
+      ],
+    );
+  }
+
   /// Single-image thumbnail used inside dialogs/sheets so we don't share
   /// [_imagePageController] with a second PageView (which causes an assertion).
   Widget _buildSheetThumb() {
@@ -1388,15 +1671,29 @@ class _ProductViewPageState extends State<ProductViewPage> {
     }
     final url = images.first;
     if (url.startsWith('assets/') || url.startsWith('images/')) {
-      return Image.asset(url, fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => const Center(
-                child: Icon(Icons.image_not_supported_outlined,
-                    size: 36, color: Color(0xFFB6BDCC))));
-    }
-    return Image.network(url, fit: BoxFit.cover,
+      return Image.asset(
+        url,
+        fit: BoxFit.cover,
         errorBuilder: (_, __, ___) => const Center(
-              child: Icon(Icons.broken_image_outlined,
-                  size: 36, color: Color(0xFFB6BDCC))));
+          child: Icon(
+            Icons.image_not_supported_outlined,
+            size: 36,
+            color: Color(0xFFB6BDCC),
+          ),
+        ),
+      );
+    }
+    return Image.network(
+      url,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => const Center(
+        child: Icon(
+          Icons.broken_image_outlined,
+          size: 36,
+          color: Color(0xFFB6BDCC),
+        ),
+      ),
+    );
   }
 
   Widget _buildDetailImage() {
@@ -1439,6 +1736,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
       },
     );
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -1491,44 +1789,47 @@ class _ProductViewPageState extends State<ProductViewPage> {
                       context,
                       MaterialPageRoute(builder: (_) => const CartPage()),
                     ),
-                    child: Stack(
-                      children: [
-                        Container(
-                          width: 40,
-                          height: 40,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFECEEF5),
-                            borderRadius: BorderRadius.circular(12),
+                    child: ValueListenableBuilder<int>(
+                      valueListenable: CartBadgeService.instance.count,
+                      builder: (context, cartCount, _) => Stack(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFECEEF5),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.shopping_cart_outlined,
+                              size: 20,
+                            ),
                           ),
-                          child: const Icon(
-                            Icons.shopping_cart_outlined,
-                            size: 20,
-                          ),
-                        ),
-                        if (_cartCount > 0)
-                          Positioned(
-                            right: 0,
-                            top: 0,
-                            child: Container(
-                              width: 16,
-                              height: 16,
-                              alignment: Alignment.center,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFFF5A524),
-                                shape: BoxShape.circle,
-                              ),
-                              child: Text(
-                                '$_cartCount',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w700,
+                          if (cartCount > 0)
+                            Positioned(
+                              right: 0,
+                              top: 0,
+                              child: Container(
+                                width: 16,
+                                height: 16,
+                                alignment: Alignment.center,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFFF5A524),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Text(
+                                  '$cartCount',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ],
@@ -1570,10 +1871,6 @@ class _ProductViewPageState extends State<ProductViewPage> {
                             ),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(20),
-                              // NotificationListener stops horizontal scroll
-                              // notifications from reaching the parent
-                              // SingleChildScrollView so the PageView can
-                              // capture swipe gestures correctly.
                               child: NotificationListener<ScrollNotification>(
                                 onNotification: (n) =>
                                     n.metrics.axis == Axis.horizontal,
@@ -1763,7 +2060,6 @@ class _ProductViewPageState extends State<ProductViewPage> {
                             ),
                           ),
                           const SizedBox(height: 8),
-                          // Shop open/closed status
                           Builder(
                             builder: (_) {
                               bool isWithinHours = false;
@@ -1795,8 +2091,8 @@ class _ProductViewPageState extends State<ProductViewPage> {
                                   const SizedBox(width: 6),
                                   Text(
                                     shopOpen
-                                        ? 'Open \u00b7 Closes ${to12Hour(_sellerCloseTime)}'
-                                        : 'Closed \u00b7 Opens ${to12Hour(_sellerOpenTime)}',
+                                        ? 'Open · Closes ${to12Hour(_sellerCloseTime)}'
+                                        : 'Closed · Opens ${to12Hour(_sellerOpenTime)}',
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
@@ -1807,7 +2103,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
                                   ),
                                   const SizedBox(width: 8),
                                   Text(
-                                    '${to12Hour(_sellerOpenTime)} \u2013 ${to12Hour(_sellerCloseTime)}',
+                                    '${to12Hour(_sellerOpenTime)} – ${to12Hour(_sellerCloseTime)}',
                                     style: const TextStyle(
                                       fontSize: 11,
                                       color: Color(0xFF9299AA),
@@ -1818,7 +2114,6 @@ class _ProductViewPageState extends State<ProductViewPage> {
                             },
                           ),
                           const SizedBox(height: 6),
-                          // Delivery availability badge
                           if (_sellerDeliveryEnabled)
                             Row(
                               children: [
@@ -1949,7 +2244,6 @@ class _ProductViewPageState extends State<ProductViewPage> {
                             ],
                           ),
                           const SizedBox(height: 12),
-                          // Message Seller button
                           SizedBox(
                             width: double.infinity,
                             child: OutlinedButton.icon(
@@ -2008,95 +2302,8 @@ class _ProductViewPageState extends State<ProductViewPage> {
                               fontSize: 14,
                             ),
                           ),
-                          // ── Karinderya info card ──
-                          if ((widget.product['product_type']?.toString() ??
-                                  '') ==
-                              'karinderya') ...[
-                            const SizedBox(height: 14),
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFFFF4ED),
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: const Color(
-                                    0xFFFF6B35,
-                                  ).withValues(alpha: 0.3),
-                                ),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Row(
-                                    children: [
-                                      Icon(
-                                        Icons.restaurant_rounded,
-                                        size: 16,
-                                        color: Color(0xFFD4500A),
-                                      ),
-                                      SizedBox(width: 6),
-                                      Text(
-                                        'Karinderya / Cooked Food',
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w800,
-                                          color: Color(0xFFD4500A),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 10),
-                                  if ((widget.product['pricing_basis']
-                                              ?.toString() ??
-                                          '')
-                                      .isNotEmpty)
-                                    _karRow(
-                                      Icons.price_change_outlined,
-                                      'Pricing',
-                                      widget.product['pricing_basis']
-                                          .toString(),
-                                    ),
-                                  if ((widget.product['prep_time']
-                                              ?.toString() ??
-                                          '')
-                                      .isNotEmpty) ...[
-                                    const SizedBox(height: 6),
-                                    _karRow(
-                                      Icons.schedule_rounded,
-                                      'Ready in',
-                                      widget.product['prep_time'].toString(),
-                                    ),
-                                  ],
-                                  if ((widget.product['variants']?.toString() ??
-                                          '')
-                                      .isNotEmpty) ...[
-                                    const SizedBox(height: 6),
-                                    _karRow(
-                                      Icons.tune_rounded,
-                                      'Options',
-                                      widget.product['variants'].toString(),
-                                    ),
-                                  ],
-                                  const SizedBox(height: 6),
-                                  _karRow(
-                                    Icons.today_rounded,
-                                    'Today\'s status',
-                                    widget.product['daily_available'] == false
-                                        ? 'Not available today'
-                                        : 'Available today',
-                                    valueColor:
-                                        widget.product['daily_available'] ==
-                                            false
-                                        ? const Color(0xFFDC2626)
-                                        : const Color(0xFF059669),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
+                          _buildKarinderyaInfoCard(),
                           const SizedBox(height: 18),
-                          // ── Reviews section (Shopee-style) ──
                           _buildReviewsSection(),
                         ],
                       ),
@@ -2592,13 +2799,14 @@ class _ProductViewPageState extends State<ProductViewPage> {
       onTap: onTap,
       borderRadius: BorderRadius.circular(999),
       child: Container(
-        width: 28,
-        height: 28,
+        width: 34,
+        height: 34,
         decoration: BoxDecoration(
-          color: const Color(0xFFF2F4FA),
+          color: const Color(0xFFF4F7FF),
+          border: Border.all(color: const Color(0xFFDDE3F5)),
           borderRadius: BorderRadius.circular(999),
         ),
-        child: Icon(icon, size: 18, color: const Color(0xFF55607A)),
+        child: Icon(icon, size: 18, color: const Color(0xFF2A4BA0)),
       ),
     );
   }
@@ -2691,11 +2899,13 @@ class _DeliveryOptionTile extends StatelessWidget {
 class _OrderSuccessDialog extends StatelessWidget {
   final String orderType;
   final String? address;
+  final String? pickupTime;
   final VoidCallback onDone;
 
   const _OrderSuccessDialog({
     required this.orderType,
     this.address,
+    this.pickupTime,
     required this.onDone,
   });
 
@@ -2742,6 +2952,41 @@ class _OrderSuccessDialog extends StatelessWidget {
                 height: 1.5,
               ),
             ),
+            if (pickupTime != null && pickupTime!.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF5F8FF),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFDDE3F5)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.schedule_outlined,
+                      size: 18,
+                      color: Color(0xFF2A4BA0),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Pickup time: $pickupTime',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF1F2937),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,
@@ -2753,7 +2998,7 @@ class _OrderSuccessDialog extends StatelessWidget {
                   elevation: 0,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(14),
                   ),
                 ),
                 child: const Text(

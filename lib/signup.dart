@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'verification/otp.dart'; // Assuming you named your OTP file 'otp.dart'
 import 'utils/helpers.dart';
 
 // --- CONSTANTS ---
@@ -44,6 +44,165 @@ class _SignupPageState extends State<SignupPage> {
     }
   }
 
+  Future<void> _showOtpDialog(String contact) async {
+    final codeController = TextEditingController();
+    bool isDialogLoading = false;
+    final isEmailContact = isEmail(contact);
+
+    Future<void> verifyOtp(StateSetter setDialogState) async {
+      final token = codeController.text.trim();
+      if (token.length != 6) {
+        _showSnackBar("Please enter the 6-digit verification code.");
+        return;
+      }
+
+      setDialogState(() => isDialogLoading = true);
+
+      try {
+        final AuthResponse res;
+        if (isEmailContact) {
+          res = await supabase.auth.verifyOTP(
+            type: OtpType.signup,
+            email: contact,
+            token: token,
+          );
+        } else {
+          res = await supabase.auth.verifyOTP(
+            type: OtpType.sms,
+            phone: contact,
+            token: token,
+          );
+        }
+
+        if (res.session != null) {
+          try {
+            await supabase.from('user_roles').upsert({
+              'user_id': res.user!.id,
+              'role': 'buyer',
+            });
+          } catch (_) {}
+
+          if (!mounted) return;
+          Navigator.of(context, rootNavigator: true).pop();
+          Navigator.of(
+            context,
+          ).pushNamedAndRemoveUntil('/home', (Route<dynamic> route) => false);
+          _showSnackBar("Verification successful! Welcome to QuickCart.");
+        } else {
+          _showSnackBar("Verification failed. Please check the code.");
+        }
+      } on AuthException catch (e) {
+        _showSnackBar("Verification failed: ${e.message}");
+      } catch (e) {
+        _showSnackBar("An unexpected error occurred: $e");
+      } finally {
+        if (mounted) {
+          setDialogState(() => isDialogLoading = false);
+        }
+      }
+    }
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            return AlertDialog(
+              title: Text(isEmailContact ? 'Verify Email' : 'Verify Phone'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'We sent a 6-digit code to $contact',
+                    style: TextStyle(color: Colors.grey[700]),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: codeController,
+                    keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.done,
+                    textAlign: TextAlign.center,
+                    maxLength: 6,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    onSubmitted: (_) {
+                      if (!isDialogLoading) {
+                        verifyOtp(setDialogState);
+                      }
+                    },
+                    decoration: InputDecoration(
+                      hintText: "- - - - - -",
+                      hintStyle: const TextStyle(letterSpacing: 8),
+                      counterText: "",
+                      contentPadding: const EdgeInsets.symmetric(
+                        vertical: 16,
+                        horizontal: 12,
+                      ),
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey.shade300),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey.shade300),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(
+                          color: kPrimaryBlue,
+                          width: 1.5,
+                        ),
+                      ),
+                    ),
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 6,
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isDialogLoading
+                      ? null
+                      : () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: isDialogLoading
+                      ? null
+                      : () => verifyOtp(setDialogState),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kButtonBlue,
+                  ),
+                  child: isDialogLoading
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text(
+                          'Verify',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    codeController.dispose();
+  }
+
   // --- Core Signup Logic ---
   Future<void> _signUp() async {
     final input = _emailOrPhoneController.text.trim();
@@ -70,48 +229,25 @@ class _SignupPageState extends State<SignupPage> {
     try {
       if (isEmail(input)) {
         // --- EMAIL SIGNUP ---
-        final AuthResponse res = await supabase.auth.signUp(
+        await supabase.auth.signUp(
           email: input,
           password: password,
         );
 
-        if (res.user != null) {
-          // Assign 'buyer' role so the user_roles table is never empty
-          try {
-            await supabase.from('user_roles').upsert({
-              'user_id': res.user!.id,
-              'role': 'buyer',
-            });
-          } catch (_) {
-            // Non-blocking: role will default to buyer if insert fails
-          }
-          _showSnackBar("Success! Check your email for the verification link.");
-          if (mounted) {
-            Navigator.of(context).pop();
-          }
-        } else {
-          _showSnackBar("Sign up failed. Please try again.");
+        _showSnackBar("Verification code sent! Please check your email.");
+        if (mounted) {
+          await _showOtpDialog(input);
         }
       } else {
         // --- PHONE SIGNUP (OTP) ---
         // 1. Send the OTP code
         await supabase.auth.signInWithOtp(phone: input);
 
-        // **CRITICAL FIX HERE: Declare the 'phone' variable locally**
-        final phone = input;
-
         _showSnackBar(
           "Verification code sent! Please verify your phone number.",
         );
         if (mounted) {
-          // Navigate to the OTP screen
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (context) => OtpVerificationPage(
-                phoneNumber: phone,
-              ), // 'phone' is now defined!
-            ),
-          );
+          await _showOtpDialog(input);
         }
       }
     } on AuthException catch (e) {

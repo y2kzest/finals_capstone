@@ -50,21 +50,25 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _navigateAfterSignIn() async {
     if (!mounted) return;
 
-    // Check if account is suspended (admin sets profiles.status = 'suspended')
+    // Check if account is suspended (admin sets profile.status = 'suspended')
     final currentUser = supabase.auth.currentUser;
     if (currentUser != null) {
-      final profile = await supabase
-          .from('profiles')
-          .select('status')
-          .eq('id', currentUser.id)
-          .maybeSingle();
-      if (profile?['status'] == 'suspended') {
-        await supabase.auth.signOut();
-        _navigatedAfterAuth = false;
-        _showSnackBar(
-          'Your account has been suspended. Please contact the administrator.',
-        );
-        return;
+      try {
+        final profile = await supabase
+            .from('profile')
+            .select('status')
+            .eq('user_id', currentUser.id)
+            .maybeSingle();
+        if (profile?['status'] == 'suspended') {
+          await supabase.auth.signOut();
+          _navigatedAfterAuth = false;
+          _showSnackBar(
+            'Your account has been suspended. Please contact the administrator.',
+          );
+          return;
+        }
+      } catch (e) {
+        debugPrint('Login profile status check failed: $e');
       }
     }
 
@@ -147,54 +151,7 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  // --- Phone Sign-In Flow (OTP) ---
-  Future<void> _signInWithPhoneOtp() async {
-    // 1. Pre-validation checks
-    if (!_agree) {
-      _showSnackBar(
-        "Please agree to the terms and policies before signing in.",
-      );
-      return;
-    }
-
-    final phone = _emailOrPhoneController.text.trim();
-    // Supabase requires E.164 format (e.g., +12025550123). Add validation hint.
-    if (phone.isEmpty || _isEmail(phone)) {
-      _showSnackBar(
-        "Please enter a valid phone number (e.g., +1234567890) for OTP login.",
-      );
-      return;
-    }
-
-    setState(() => _isLoading = true);
-
-    try {
-      // Step 1: Request OTP via Supabase passwordless sign-in
-      // This sends an SMS code to the provided phone number.
-      await supabase.auth.signInWithOtp(phone: phone);
-
-      _showSnackBar("Verification code sent! Please verify your phone number.");
-
-      if (mounted) {
-        // Step 2: Navigate to the OTP verification page
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            // Use the OtpVerificationPage defined in otp.dart
-            builder: (context) =>
-                OtpVerificationPage(phoneNumber: phone), // <-- CALL IS CORRECT
-          ),
-        );
-      }
-    } on AuthException catch (e) {
-      // The error message shows up here if Supabase rejects the phone number/request
-      _showSnackBar("OTP Request failed: ${e.message}");
-    } catch (e) {
-      _showSnackBar("An unexpected error occurred: $e");
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
+  // Removed OTP stuff
 
   // Function to handle user sign-in using email and password
   Future<void> _signInWithEmailPassword() async {
@@ -343,39 +300,46 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  Widget _buildGoogleButton(
-    VoidCallback? onTap, {
-    bool showSpinner = false,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(999),
-      child: Container(
-        width: 50,
-        height: 50,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: Colors.white,
-          border: Border.all(color: Colors.grey.shade300, width: 1),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.1),
-              blurRadius: 6,
-              offset: const Offset(0, 3),
-            ),
-          ],
+  Widget _buildWideGoogleButton(VoidCallback? onTap, {bool showSpinner = false}) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton(
+        style: OutlinedButton.styleFrom(
+          backgroundColor: Colors.white, // White background
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          side: BorderSide(color: Colors.grey.shade300, width: 1), // Light border
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(999), // Pill shape
+          ),
         ),
+        onPressed: onTap,
         child: showSpinner
-            ? const Padding(
-                padding: EdgeInsets.all(12.0),
-                child: CircularProgressIndicator(strokeWidth: 2.5),
-              )
-            : Padding(
-                padding: const EdgeInsets.all(12.0),
-                child: Image.asset(
-                  'assets/img/banner image/google-logo-png.png',
-                  fit: BoxFit.contain,
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 3,
+                  color: kPrimaryBlue,
                 ),
+              )
+            : Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Image.asset(
+                    'assets/img/banner image/google-logo-png.png',
+                    height: 20,
+                    fit: BoxFit.contain,
+                  ),
+                  const SizedBox(width: 12),
+                  const Text(
+                    "Continue with Google",
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                  ),
+                ],
               ),
       ),
     );
@@ -454,25 +418,28 @@ class _LoginPageState extends State<LoginPage> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 80),
-                        child: Image.asset(
-                          "assets/img/logo.png",
-                          height: 90,
-                          fit: BoxFit.contain,
-                          errorBuilder: (context, error, stackTrace) {
-                            return const Text(
-                              "QUICKCART",
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 32,
-                                fontWeight: FontWeight.w900,
-                                color: kButtonBlue,
-                              ),
-                            );
-                          },
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Transform.scale(
+                          scale: 1.6,
+                          child: Image.asset(
+                            "assets/img/banner image/loginlogo.png",
+                            height: 160,
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stackTrace) {
+                              return const Text(
+                                "QUICKCART",
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.w900,
+                                  color: kButtonBlue,
+                                ),
+                              );
+                            },
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 16),
                       const Text(
                         "Welcome back",
                         textAlign: TextAlign.center,
@@ -484,20 +451,19 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        "Sign in using your email or phone number",
+                        "Sign in to your account",
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 14, color: Colors.grey[700]),
                       ),
                       const SizedBox(height: 24),
-                      _sectionLabel("Email Address or Phone Number"),
+                      _sectionLabel("Email Address"),
                       TextField(
                         controller: _emailOrPhoneController,
-                        keyboardType: TextInputType.text,
+                        keyboardType: TextInputType.emailAddress,
                         textInputAction: TextInputAction.next,
                         onChanged: (_) => setState(() {}),
                         decoration: _fieldDecoration(
-                          hintText:
-                              "Enter email (for password login) or phone (for OTP)",
+                          hintText: "Enter your email",
                           icon: Icons.person_outline,
                         ),
                       ),
@@ -661,75 +627,9 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: kPrimaryBlue,
-                            padding: const EdgeInsets.symmetric(vertical: 18),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            elevation: 2,
-                          ),
-                          onPressed: _isLoading || isEmailInput
-                              ? null
-                              : _signInWithPhoneOtp,
-                          child: _isLoading && !isEmailInput
-                              ? const SizedBox(
-                                  width: 24,
-                                  height: 24,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 3,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : const Text(
-                                  "Login with Phone (OTP)",
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      Row(
-                        children: [
-                          const Expanded(child: Divider(color: Colors.grey)),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14.0,
-                            ),
-                            child: Text(
-                              "Or continue with",
-                              style: TextStyle(
-                                color: Colors.grey[600],
-                                fontSize: 14,
-                              ),
-                            ),
-                          ),
-                          const Expanded(child: Divider(color: Colors.grey)),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          _buildGoogleButton(
-                            _isOAuthLoading ? null : _signInWithGoogle,
-                            showSpinner: _isOAuthLoading,
-                          ),
-                          const SizedBox(width: 24),
-                          _buildSocialButton(
-                            Icons.facebook_rounded,
-                            const Color(0xFF1877F2),
-                            () {
-                              _showSnackBar("Facebook Sign-in not wired yet.");
-                            },
-                          ),
-                        ],
+                      _buildWideGoogleButton(
+                        _isOAuthLoading ? null : _signInWithGoogle,
+                        showSpinner: _isOAuthLoading,
                       ),
                       const SizedBox(height: 20),
                       Row(
