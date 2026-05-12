@@ -44,8 +44,8 @@ class _OtpVerificationPageState extends State<OtpVerificationPage> {
   // --- Core OTP Verification Logic ---
   Future<void> _verifyOtp() async {
     final token = _otpController.text.trim();
-    if (token.length != 6) {
-      _showSnackBar("Please enter the 6-digit verification code.");
+    if (token.length != 8) {
+      _showSnackBar("Please enter the 8-digit verification code.");
       return;
     }
 
@@ -148,7 +148,7 @@ class _OtpVerificationPageState extends State<OtpVerificationPage> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        "We sent a 6-digit code to ${widget.contact}",
+                        "We sent an 8-digit code to ${widget.contact}",
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 14, color: Colors.grey[700]),
                       ),
@@ -158,7 +158,7 @@ class _OtpVerificationPageState extends State<OtpVerificationPage> {
                         keyboardType: TextInputType.number,
                         textInputAction: TextInputAction.done,
                         textAlign: TextAlign.center,
-                        maxLength: 6,
+                        maxLength: 8,
                         inputFormatters: [
                           FilteringTextInputFormatter.digitsOnly,
                         ],
@@ -168,8 +168,8 @@ class _OtpVerificationPageState extends State<OtpVerificationPage> {
                           }
                         },
                         decoration: InputDecoration(
-                          hintText: "- - - - - -",
-                          hintStyle: const TextStyle(letterSpacing: 8),
+                          hintText: "- - - - - - - -",
+                          hintStyle: const TextStyle(letterSpacing: 6),
                           counterText: "",
                           contentPadding: const EdgeInsets.symmetric(
                             vertical: 20,
@@ -194,9 +194,9 @@ class _OtpVerificationPageState extends State<OtpVerificationPage> {
                           ),
                         ),
                         style: const TextStyle(
-                          fontSize: 26,
+                          fontSize: 22,
                           fontWeight: FontWeight.bold,
-                          letterSpacing: 6,
+                          letterSpacing: 4,
                         ),
                       ),
                       const SizedBox(height: 22),

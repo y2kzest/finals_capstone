@@ -27,6 +27,7 @@ class _SignupPageState extends State<SignupPage> {
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   bool _isLoading = false;
+  String? _lastOtpContact;
 
   @override
   void dispose() {
@@ -51,8 +52,8 @@ class _SignupPageState extends State<SignupPage> {
 
     Future<void> verifyOtp(StateSetter setDialogState) async {
       final token = codeController.text.trim();
-      if (token.length != 6) {
-        _showSnackBar("Please enter the 6-digit verification code.");
+      if (token.length != 8) {
+        _showSnackBar("Please enter the 8-digit verification code.");
         return;
       }
 
@@ -115,7 +116,7 @@ class _SignupPageState extends State<SignupPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'We sent a 6-digit code to $contact',
+                    'We sent an 8-digit code to $contact',
                     style: TextStyle(color: Colors.grey[700]),
                   ),
                   const SizedBox(height: 12),
@@ -124,7 +125,7 @@ class _SignupPageState extends State<SignupPage> {
                     keyboardType: TextInputType.number,
                     textInputAction: TextInputAction.done,
                     textAlign: TextAlign.center,
-                    maxLength: 6,
+                    maxLength: 8,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                     onSubmitted: (_) {
                       if (!isDialogLoading) {
@@ -132,8 +133,8 @@ class _SignupPageState extends State<SignupPage> {
                       }
                     },
                     decoration: InputDecoration(
-                      hintText: "- - - - - -",
-                      hintStyle: const TextStyle(letterSpacing: 8),
+                      hintText: "- - - - - - - -",
+                      hintStyle: const TextStyle(letterSpacing: 6),
                       counterText: "",
                       contentPadding: const EdgeInsets.symmetric(
                         vertical: 16,
@@ -158,9 +159,9 @@ class _SignupPageState extends State<SignupPage> {
                       ),
                     ),
                     style: const TextStyle(
-                      fontSize: 22,
+                      fontSize: 20,
                       fontWeight: FontWeight.bold,
-                      letterSpacing: 6,
+                      letterSpacing: 4,
                     ),
                   ),
                 ],
@@ -234,6 +235,7 @@ class _SignupPageState extends State<SignupPage> {
           password: password,
         );
 
+        _lastOtpContact = input;
         _showSnackBar("Verification code sent! Please check your email.");
         if (mounted) {
           await _showOtpDialog(input);
@@ -243,6 +245,7 @@ class _SignupPageState extends State<SignupPage> {
         // 1. Send the OTP code
         await supabase.auth.signInWithOtp(phone: input);
 
+        _lastOtpContact = input;
         _showSnackBar(
           "Verification code sent! Please verify your phone number.",
         );
@@ -472,6 +475,32 @@ class _SignupPageState extends State<SignupPage> {
                                     color: Colors.white,
                                   ),
                                 ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextButton(
+                        onPressed: _isLoading
+                            ? null
+                            : () {
+                                final enteredContact =
+                                    _emailOrPhoneController.text.trim();
+                                final contact = enteredContact.isNotEmpty
+                                    ? enteredContact
+                                    : _lastOtpContact;
+                                if (contact == null || contact.isEmpty) {
+                                  _showSnackBar(
+                                    "Enter your email or phone first.",
+                                  );
+                                  return;
+                                }
+                                _showOtpDialog(contact);
+                              },
+                        child: const Text(
+                          "Already have a code? Verify",
+                          style: TextStyle(
+                            color: kPrimaryBlue,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 10),
