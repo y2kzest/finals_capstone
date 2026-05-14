@@ -82,6 +82,7 @@ class _OtpVerificationPageState extends State<OtpVerificationPage> {
           });
         } catch (_) {}
 
+        if (!mounted) return;
         // Navigate to the home screen
         Navigator.of(
           context,

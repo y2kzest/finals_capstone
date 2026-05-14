@@ -19,8 +19,15 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const PAYMONGO_BASE = 'https://api.paymongo.com/v1';
-const ALLOWED_METHODS = ['gcash', 'paymaya', 'grab_pay'] as const;
+// PayMongo renamed the PayMaya source_type to "maya" — the old value
+// "paymaya" now returns parameter_invalid. Keep both in the allow-list so
+// older app clients still work, but always send "maya" to PayMongo.
+const ALLOWED_METHODS = ['gcash', 'maya', 'paymaya', 'grab_pay'] as const;
 type WalletMethod = (typeof ALLOWED_METHODS)[number];
+
+function normalizeMethod(method: WalletMethod): string {
+  return method === 'paymaya' ? 'maya' : method;
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -142,7 +149,7 @@ Deno.serve(async (req) => {
           attributes: {
             amount: amountCentavos,
             currency: 'PHP',
-            type: method,
+            type: normalizeMethod(method),
             redirect: { success: successUrl, failed: failedUrl },
             billing: {
               name,
@@ -190,7 +197,7 @@ Deno.serve(async (req) => {
   const { error: updErr } = await admin
     .from('orders')
     .update({
-      payment_method: method,
+      payment_method: normalizeMethod(method),
       payment_status: 'pending',
       paymongo_source_id: sourceId,
       paymongo_checkout_url: checkoutUrl,

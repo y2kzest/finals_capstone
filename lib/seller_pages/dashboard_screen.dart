@@ -375,7 +375,7 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
           clipBehavior: Clip.antiAlias,
           child: _logoUrl != null && _logoUrl!.isNotEmpty
               ? Image.network(_logoUrl!, fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Center(
+                  errorBuilder: (_, _, _) => Center(
                     child: Text(_userName.isNotEmpty ? _userName[0].toUpperCase() : 'S',
                         style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
                   ))

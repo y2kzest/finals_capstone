@@ -424,7 +424,7 @@ class _EditProductPageState extends State<EditProductPage> {
                           Switch(
                             value: dailyAvailable,
                             onChanged: (v) => setState(() => dailyAvailable = v),
-                            activeColor: _kPrimary,
+                            activeThumbColor: _kPrimary,
                           ),
                         ]),
                       ),
@@ -550,7 +550,7 @@ class _EditProductPageState extends State<EditProductPage> {
                           width: 100,
                           height: 100,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
+                          errorBuilder: (_, _, _) => Container(
                             width: 100,
                             height: 100,
                             color: const Color(0xFFEEF1F8),
@@ -792,7 +792,7 @@ class _EditProductPageState extends State<EditProductPage> {
         ],
       ),
       child: DropdownButtonFormField<T>(
-        value: value,
+        initialValue: value,
         items: items
             .map((e) =>
                 DropdownMenuItem(value: e, child: Text(e.toString())))

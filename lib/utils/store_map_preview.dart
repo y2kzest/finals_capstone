@@ -1,84 +1,20 @@
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../services/buyer_location_service.dart';
+import '../services/osrm_route_service.dart';
 import 'market_geo.dart';
 
 const Color _kPrimary = Color(0xFF2A4BA0);
 const Color _kPrimaryDark = Color(0xFF153075);
 const Color _kRouteBlue = Color(0xFF1A73E8);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// OSRM road-routing helpers
-// ─────────────────────────────────────────────────────────────────────────────
+typedef _RouteResult = OsrmRoute;
 
-class _RouteResult {
-  const _RouteResult({
-    required this.points,
-    required this.distanceMeters,
-    required this.durationSeconds,
-  });
-
-  final List<LatLng> points;
-  final double distanceMeters;
-  final double durationSeconds;
-
-  String get durationLabel {
-    final mins = (durationSeconds / 60).round();
-    if (mins < 60) return '$mins min';
-    final h = mins ~/ 60;
-    final m = mins % 60;
-    return m == 0 ? '${h}h' : '${h}h ${m}m';
-  }
-
-  String get distanceLabel {
-    if (distanceMeters < 1000) return '${distanceMeters.round()} m';
-    return '${(distanceMeters / 1000).toStringAsFixed(1)} km';
-  }
-}
-
-Future<_RouteResult?> _callOsrm(LatLng from, LatLng to) async {
-  final uri = Uri.parse(
-    'https://router.project-osrm.org/route/v1/driving/'
-    '${from.longitude},${from.latitude};'
-    '${to.longitude},${to.latitude}'
-    '?overview=full&geometries=geojson',
-  );
-  final client = HttpClient();
-  try {
-    final req = await client.getUrl(uri).timeout(const Duration(seconds: 12));
-    final res = await req.close();
-    if (res.statusCode != 200) return null;
-    final body = await res.transform(utf8.decoder).join();
-    final data = jsonDecode(body) as Map<String, dynamic>;
-    final routes = data['routes'] as List?;
-    if (routes == null || routes.isEmpty) return null;
-    final r = routes[0] as Map<String, dynamic>;
-    final geo = r['geometry'] as Map<String, dynamic>;
-    final coords = (geo['coordinates'] as List)
-        .map(
-          (c) => LatLng(
-            (c[1] as num).toDouble(),
-            (c[0] as num).toDouble(),
-          ),
-        )
-        .toList();
-    return _RouteResult(
-      points: coords,
-      distanceMeters: (r['distance'] as num).toDouble(),
-      durationSeconds: (r['duration'] as num).toDouble(),
-    );
-  } catch (_) {
-    return null;
-  } finally {
-    client.close();
-  }
-}
+Future<_RouteResult?> _callOsrm(LatLng from, LatLng to) =>
+    OsrmRouteService.instance.fetchRoute(from, to);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // StoreMapPreview  (small non-interactive thumbnail)
@@ -298,7 +234,18 @@ class _StoreMapFullScreenState extends State<StoreMapFullScreen> {
   @override
   void initState() {
     super.initState();
-    _loadBuyerPoint();
+    // Use the cached buyer point immediately (no awaiting) so the route can
+    // begin drawing as soon as the first frame paints. Fall back to the async
+    // loader only if there's no cached value yet.
+    final cached = BuyerLocationService.instance.cachedPoint;
+    if (cached != null) {
+      _buyerPoint = cached;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showRoute();
+      });
+    } else {
+      _loadBuyerPoint();
+    }
   }
 
   Future<void> _loadBuyerPoint() async {
@@ -351,19 +298,40 @@ class _StoreMapFullScreenState extends State<StoreMapFullScreen> {
         _snack('Location permission denied.');
         return;
       }
+
+      // 1) Show the last known position immediately (usually <100 ms).
+      try {
+        final last = await Geolocator.getLastKnownPosition();
+        if (last != null && mounted) {
+          setState(() {
+            _buyerPoint = LatLng(last.latitude, last.longitude);
+            _routeResult = null;
+            _routeFailed = false;
+          });
+          _showRoute();
+        }
+      } catch (_) {}
+
+      // 2) Then upgrade with a fresh high-accuracy fix in the background.
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 8),
         ),
       );
       final next = LatLng(pos.latitude, pos.longitude);
       if (!mounted) return;
+      // Only redraw the route if the fresh fix moved meaningfully.
+      final moved = _buyerPoint == null ||
+          distanceMeters(_buyerPoint!, next) > 25;
       setState(() {
         _buyerPoint = next;
-        _routeResult = null;
-        _routeFailed = false;
+        if (moved) {
+          _routeResult = null;
+          _routeFailed = false;
+        }
       });
-      _showRoute();
+      if (moved) _showRoute();
     } catch (e) {
       _snack('Could not get location: $e');
     } finally {

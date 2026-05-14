@@ -99,8 +99,9 @@ class _ProfileState extends State<Profile> {
           .from('wishlist')
           .select('id')
           .eq('user_id', user.id);
-      if (mounted)
+      if (mounted) {
         setState(() => _wishlistCount = (wishlistRes as List).length);
+      }
     } catch (_) {}
     try {
       final activeRes = await supabase
@@ -108,8 +109,9 @@ class _ProfileState extends State<Profile> {
           .select('id')
           .eq('buyer_id', user.id)
           .inFilter('status', ['pending', 'accepted', 'ready']);
-      if (mounted)
+      if (mounted) {
         setState(() => _activeOrderCount = (activeRes as List).length);
+      }
     } catch (_) {}
 
     try {

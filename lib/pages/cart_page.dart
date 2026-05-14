@@ -201,11 +201,12 @@ class _CartPageState extends State<CartPage> {
     final user = supabase.auth.currentUser;
     if (user == null) {
       CartBadgeService.instance.syncFromRows(const []);
-      if (mounted)
+      if (mounted) {
         setState(() {
           _cartItems = [];
           _isLoading = false;
         });
+      }
       return;
     }
     try {
@@ -323,6 +324,26 @@ class _CartPageState extends State<CartPage> {
   Future<void> _checkout() async {
     final user = supabase.auth.currentUser;
     if (user == null || _cartItems.isEmpty) return;
+
+    // Safety net: block sellers from ordering products from their own shop,
+    // even if the items somehow ended up in their cart.
+    final ownShopItem = _cartItems.firstWhere(
+      (i) => i['seller_id']?.toString() == user.id,
+      orElse: () => const {},
+    );
+    if (ownShopItem.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "You can't order from your own shop. Remove your own items first.",
+          ),
+          backgroundColor: Color(0xFFDC2626),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isCheckingOut = true);
     try {
       // Batch-fetch seller profiles (address + delivery_enabled)
@@ -1311,7 +1332,9 @@ class _CartPageState extends State<CartPage> {
 
   double get _subtotal {
     double t = 0;
-    for (final i in _cartItems) t += _price(i['price']) * _qty(i['qty']);
+    for (final i in _cartItems) {
+      t += _price(i['price']) * _qty(i['qty']);
+    }
     return t;
   }
 
@@ -1936,7 +1959,9 @@ class _CartPageState extends State<CartPage> {
   Widget _buildShopGroup(String shopName, List<Map<String, dynamic>> items) {
     double shopTotal = 0;
     final itemCount = items.length;
-    for (final i in items) shopTotal += _price(i['price']) * _qty(i['qty']);
+    for (final i in items) {
+      shopTotal += _price(i['price']) * _qty(i['qty']);
+    }
     final sellerId = items.first['seller_id']?.toString();
     final logoUrl = sellerId != null ? _sellerLogos[sellerId] : null;
     return Container(
@@ -1977,7 +2002,7 @@ class _CartPageState extends State<CartPage> {
                           child: Image.network(
                             logoUrl,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Center(
+                            errorBuilder: (_, _, _) => Center(
                               child: Text(
                                 shopName.isNotEmpty
                                     ? shopName[0].toUpperCase()
@@ -2143,7 +2168,7 @@ class _CartPageState extends State<CartPage> {
                     : Image.network(
                         imgUrl,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
+                        errorBuilder: (_, _, _) => Container(
                           color: const Color(0xFFF1F3F9),
                           child: const Icon(
                             Icons.image_outlined,

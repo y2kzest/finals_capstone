@@ -88,9 +88,21 @@ class _PickLocationPageState extends State<PickLocationPage>
         if (!silent) _snack('Location permission denied.');
         return;
       }
+
+      // Move to the last known fix immediately for instant feedback.
+      try {
+        final last = await Geolocator.getLastKnownPosition();
+        if (last != null && mounted) {
+          final approx = LatLng(last.latitude, last.longitude);
+          setState(() => _center = approx);
+          _mapController.move(approx, 18);
+        }
+      } catch (_) {}
+
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 8),
         ),
       );
       final next = LatLng(pos.latitude, pos.longitude);

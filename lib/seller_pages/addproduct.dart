@@ -312,7 +312,7 @@ class _AddProductPageState extends State<AddProductPage> {
                           Switch(
                             value: dailyAvailable,
                             onChanged: (v) => setState(() => dailyAvailable = v),
-                            activeColor: _kPrimary,
+                            activeThumbColor: _kPrimary,
                           ),
                         ]),
                       ),
@@ -572,7 +572,7 @@ class _AddProductPageState extends State<AddProductPage> {
             blurRadius: 8, offset: const Offset(0, 2))],
       ),
       child: DropdownButtonFormField<T>(
-        value: value,
+        initialValue: value,
         items: items.map((e) => DropdownMenuItem(value: e, child: Text(e.toString()))).toList(),
         onChanged: onChanged,
         icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF9CA3AF)),

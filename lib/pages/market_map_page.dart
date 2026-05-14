@@ -50,6 +50,8 @@ class _MarketMapPageState extends State<MarketMapPage> {
   @override
   void initState() {
     super.initState();
+    // Run both in parallel — stalls come from the DB and GPS from the OS,
+    // there's no reason to wait for one before kicking off the other.
     _loadStalls();
     _tryGetLocation();
   }
@@ -111,9 +113,21 @@ class _MarketMapPageState extends State<MarketMapPage> {
           perm == LocationPermission.deniedForever) {
         return;
       }
+
+      // Show the last known fix instantly (usually <100 ms) so distances
+      // start rendering before a fresh GPS lock comes back.
+      try {
+        final last = await Geolocator.getLastKnownPosition();
+        if (last != null && mounted) {
+          setState(() =>
+              _myLocation = LatLng(last.latitude, last.longitude));
+        }
+      } catch (_) {}
+
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 8),
         ),
       );
       if (!mounted) return;
@@ -487,7 +501,7 @@ class _MarketMapPageState extends State<MarketMapPage> {
                       : ListView.separated(
                           padding: const EdgeInsets.fromLTRB(12, 4, 12, 18),
                           itemCount: stalls.length,
-                          separatorBuilder: (_, __) =>
+                          separatorBuilder: (_, _) =>
                               const SizedBox(height: 8),
                           itemBuilder: (_, i) {
                             final stall = stalls[i];

@@ -1289,11 +1289,11 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen>
     if (url.startsWith('assets/') || url.startsWith('images/')) {
       return Image.asset(url,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => _placeholder());
+          errorBuilder: (_, _, _) => _placeholder());
     }
     return Image.network(url,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _placeholder());
+        errorBuilder: (_, _, _) => _placeholder());
   }
 
   Widget _placeholder() {

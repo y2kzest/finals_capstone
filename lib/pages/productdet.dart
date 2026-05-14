@@ -260,6 +260,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
 
     int selectedRating = 5;
     final commentCtrl = TextEditingController();
+    if (!mounted) return;
     await showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -340,8 +341,9 @@ class _ProductViewPageState extends State<ProductViewPage> {
                       .select('id')
                       .single();
                   if (mounted) {
+                    final messenger = ScaffoldMessenger.of(context);
                     await _fetchReviews();
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    messenger.showSnackBar(
                       const SnackBar(content: Text('Review submitted!')),
                     );
                   }
@@ -488,8 +490,9 @@ class _ProductViewPageState extends State<ProductViewPage> {
   }
 
   String get _marketLocation {
-    if (_storeAddress != null && _storeAddress!.isNotEmpty)
+    if (_storeAddress != null && _storeAddress!.isNotEmpty) {
       return _storeAddress!;
+    }
     final location = widget.product['market_location']?.toString().trim();
     if (location != null && location.isNotEmpty) return location;
     return 'Public Market';
@@ -636,6 +639,15 @@ class _ProductViewPageState extends State<ProductViewPage> {
     final sellerId = widget.product['seller_id']?.toString();
     final effectivePrice = price ?? _priceValue;
 
+    if (sellerId != null && sellerId == user.id) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("You can't order from your own shop."),
+        ),
+      );
+      return;
+    }
+
     try {
       // Only deduplicate when no variant is selected (different variants are
       // distinct line-items).
@@ -691,10 +703,11 @@ class _ProductViewPageState extends State<ProductViewPage> {
       }
 
       if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
       await CartBadgeService.instance.refreshCount();
       final variantLabel =
           selectedVariant != null ? ' ($selectedVariant)' : '';
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         SnackBar(
           content: Text(
             'Added ${_formatQty(_quantity)} $_unitType $productName$variantLabel to cart!',
@@ -726,6 +739,16 @@ class _ProductViewPageState extends State<ProductViewPage> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Please login first.')));
+      return;
+    }
+
+    final productSellerId = widget.product['seller_id']?.toString();
+    if (productSellerId != null && productSellerId == buyerId) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("You can't order from your own shop."),
+        ),
+      );
       return;
     }
 
@@ -1547,7 +1570,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
                             value: allowSubstitution,
                             onChanged: (v) =>
                                 setModal(() => allowSubstitution = v),
-                            activeColor: const Color(0xFF2A4BA0),
+                            activeThumbColor: const Color(0xFF2A4BA0),
                           ),
                         ],
                       ),
@@ -1879,7 +1902,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
       return Image.asset(
         url,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => const Center(
+        errorBuilder: (_, _, _) => const Center(
           child: Icon(
             Icons.image_not_supported_outlined,
             size: 36,
@@ -1891,7 +1914,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
     return Image.network(
       url,
       fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) => const Center(
+      errorBuilder: (_, _, _) => const Center(
         child: Icon(
           Icons.broken_image_outlined,
           size: 36,
@@ -1918,7 +1941,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
           return Image.asset(
             url,
             fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => const Center(
+            errorBuilder: (_, _, _) => const Center(
               child: Icon(
                 Icons.image_not_supported_outlined,
                 size: 54,
@@ -1930,7 +1953,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
         return Image.network(
           url,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => const Center(
+          errorBuilder: (_, _, _) => const Center(
             child: Icon(
               Icons.broken_image_outlined,
               size: 54,
@@ -2212,7 +2235,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
                                         ? Image.network(
                                             _sellerLogoUrl!,
                                             fit: BoxFit.cover,
-                                            errorBuilder: (_, __, ___) =>
+                                            errorBuilder: (_, _, _) =>
                                                 const Icon(
                                                   Icons.storefront_outlined,
                                                   size: 18,
@@ -2370,13 +2393,13 @@ class _ProductViewPageState extends State<ProductViewPage> {
                                   ),
                                   decoration: BoxDecoration(
                                     color: const Color(
-                                      0xFF9299AA,
-                                    ).withValues(alpha: 0.08),
+                                      0xFFB45309,
+                                    ).withValues(alpha: 0.10),
                                     borderRadius: BorderRadius.circular(6),
                                     border: Border.all(
                                       color: const Color(
-                                        0xFF9299AA,
-                                      ).withValues(alpha: 0.25),
+                                        0xFFB45309,
+                                      ).withValues(alpha: 0.30),
                                     ),
                                   ),
                                   child: const Row(
@@ -2385,15 +2408,15 @@ class _ProductViewPageState extends State<ProductViewPage> {
                                       Icon(
                                         Icons.storefront_rounded,
                                         size: 13,
-                                        color: Color(0xFF9299AA),
+                                        color: Color(0xFFB45309),
                                       ),
                                       SizedBox(width: 5),
                                       Text(
-                                        'Pick-up Only',
+                                        'Pickup only',
                                         style: TextStyle(
-                                          color: Color(0xFF9299AA),
+                                          color: Color(0xFFB45309),
                                           fontSize: 11,
-                                          fontWeight: FontWeight.w600,
+                                          fontWeight: FontWeight.w700,
                                         ),
                                       ),
                                     ],
@@ -2472,8 +2495,9 @@ class _ProductViewPageState extends State<ProductViewPage> {
                               onPressed: () {
                                 final sellerId = widget.product['seller_id']
                                     ?.toString();
-                                if (sellerId == null || sellerId.isEmpty)
+                                if (sellerId == null || sellerId.isEmpty) {
                                   return;
+                                }
                                 openOrCreateConversation(
                                   context,
                                   sellerId: sellerId,

@@ -69,17 +69,19 @@ class _CategoryListPageState extends State<CategoryListPage> {
     }
   }
 
+  bool get _showAllCategories => widget.category == 'All';
+
   Future<void> _fetchProducts() async {
     if (!mounted) return;
     setState(() => _isLoading = true);
 
     try {
-      final resp = await Supabase.instance.client
-          .from('product')
-          .select(
+      final base = Supabase.instance.client.from('product').select(
             '*, seller_profiles!product_seller_id_fkey(store_name, is_open, opening_time, closing_time, approval_status)',
-          )
-          .ilike('category', _dbCategory())
+          );
+      final resp = await (_showAllCategories
+              ? base
+              : base.ilike('category', _dbCategory()))
           .order('id', ascending: false);
 
       final all = List<Map<String, dynamic>>.from(resp);
@@ -98,10 +100,10 @@ class _CategoryListPageState extends State<CategoryListPage> {
       }
     } catch (_) {
       try {
-        final resp = await Supabase.instance.client
-            .from('product')
-            .select()
-            .ilike('category', _dbCategory())
+        final base = Supabase.instance.client.from('product').select();
+        final resp = await (_showAllCategories
+                ? base
+                : base.ilike('category', _dbCategory()))
             .order('id', ascending: false);
 
         if (mounted) {
@@ -259,6 +261,15 @@ class _CategoryListPageState extends State<CategoryListPage> {
     final sellerId = product['seller_id']?.toString();
     final effectivePrice = price ?? (product['price'] as num?)?.toDouble() ?? 0.0;
 
+    if (sellerId != null && sellerId == user.id) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("You can't order from your own shop."),
+        ),
+      );
+      return;
+    }
+
     try {
       // Only deduplicate when no variant is selected.
       Map<String, dynamic>? existing;
@@ -345,7 +356,7 @@ class _CategoryListPageState extends State<CategoryListPage> {
       return Image.asset(
         imageUrl,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _imagePlaceholder(),
+        errorBuilder: (_, _, _) => _imagePlaceholder(),
       );
     }
     return Image.network(
@@ -353,7 +364,7 @@ class _CategoryListPageState extends State<CategoryListPage> {
       fit: BoxFit.cover,
       loadingBuilder: (_, child, progress) =>
           progress == null ? child : _imagePlaceholder(),
-      errorBuilder: (_, __, ___) => _imagePlaceholder(),
+      errorBuilder: (_, _, _) => _imagePlaceholder(),
     );
   }
 
@@ -919,7 +930,7 @@ class _CategoryListPageState extends State<CategoryListPage> {
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: _sortOptions.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  separatorBuilder: (_, _) => const SizedBox(width: 8),
                   itemBuilder: (context, i) {
                     final opt = _sortOptions[i];
                     final active = opt == _selectedSort;

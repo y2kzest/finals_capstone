@@ -543,7 +543,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     final storeLng = (order['store_lng'] as num?)?.toDouble();
     final deliveryLat = (order['delivery_lat'] as num?)?.toDouble();
     final deliveryLng = (order['delivery_lng'] as num?)?.toDouble();
-    final textScale = MediaQuery.textScaleFactorOf(context).clamp(1.0, 1.6);
+    final textScale = MediaQuery.textScalerOf(context).scale(1.0).clamp(1.0, 1.6);
     final actionHeight = 40 + ((textScale - 1) * 16);
     final compactHeight = 36 + ((textScale - 1) * 12);
 
@@ -572,7 +572,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                             child: Icon(_statusIcon(status), color: color, size: 24),
                           )
                         : Image.network(imgUrl, fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
+                            errorBuilder: (_, _, _) => Container(
                               color: color.withValues(alpha: 0.1),
                               child: Icon(_statusIcon(status), color: color, size: 24),
                             ),

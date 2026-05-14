@@ -128,7 +128,7 @@ class _WishlistPageState extends State<WishlistPage> {
                                 .select()
                                 .eq('id', productId)
                                 .maybeSingle();
-                            if (product != null && mounted) {
+                            if (product != null && context.mounted) {
                               await Navigator.push(
                                 context,
                                 MaterialPageRoute(
@@ -151,7 +151,7 @@ class _WishlistPageState extends State<WishlistPage> {
                                         width: 70,
                                         height: 70,
                                         fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) =>
+                                        errorBuilder: (_, _, _) =>
                                             const _PlaceholderImage(),
                                       )
                                     : const _PlaceholderImage(),

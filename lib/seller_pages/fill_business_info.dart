@@ -1159,9 +1159,21 @@ class _StorePinPickerFieldState extends State<_StorePinPickerField> {
         _snack('Location permission denied.');
         return;
       }
+      // Snap to the cached last-known fix first so the user sees a result
+      // instantly, then upgrade with a high-accuracy reading.
+      try {
+        final last = await Geolocator.getLastKnownPosition();
+        if (last != null && mounted) {
+          final approx = LatLng(last.latitude, last.longitude);
+          widget.onPicked(approx);
+          _mapController.move(approx, 18);
+        }
+      } catch (_) {}
+
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 8),
         ),
       );
       final next = LatLng(pos.latitude, pos.longitude);

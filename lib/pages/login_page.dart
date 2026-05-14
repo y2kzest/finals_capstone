@@ -125,8 +125,16 @@ class _LoginPageState extends State<LoginPage>
   }
 
   String? _passwordResetRedirect() {
-    if (!_useNativePasswordResetRedirect()) return null;
-    return 'io.supabase.flutter://login-callback';
+    if (kIsWeb) {
+      // Use the page's actual origin so the reset link returns the user to
+      // whichever domain is currently serving the app (prod, staging, or
+      // local dev) instead of the project's default Site URL.
+      return '${Uri.base.origin}/#/';
+    }
+    if (_useNativePasswordResetRedirect()) {
+      return 'io.supabase.flutter://login-callback';
+    }
+    return null;
   }
 
   final String _userAgreementContent =
@@ -421,7 +429,7 @@ class _LoginPageState extends State<LoginPage>
                                     final message =
                                         _useNativePasswordResetRedirect()
                                             ? 'Password reset link sent to $addr. Open it on this device to set a new password.'
-                                            : 'Password reset email sent to $addr. Open the link in your browser to finish.';
+                                            : 'Password reset email sent to $addr. Open the link on this site to finish.';
                                     _showSnack(message);
                                   }
                                 }

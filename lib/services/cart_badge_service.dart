@@ -27,14 +27,12 @@ class CartBadgeService {
 
     _initialized = true;
     _activeUserId = currentUserId;
-    if (_authSubscription == null) {
-      _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen(
+    _authSubscription ??= Supabase.instance.client.auth.onAuthStateChange.listen(
         (data) {
           _activeUserId = data.session?.user.id;
           refreshCount();
         },
       );
-    }
     refreshCount();
   }
 

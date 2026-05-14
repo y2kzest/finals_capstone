@@ -352,7 +352,8 @@ class _CategoryPageState extends State<CategoryPage> {
                   ),
                 ),
                 TextButton(
-                  onPressed: () {},
+                  onPressed: () =>
+                      setState(() => selectedCategory = 'All'),
                   style: TextButton.styleFrom(
                     foregroundColor: const Color(0xFF2A4BA0),
                     backgroundColor: Colors.white,

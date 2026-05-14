@@ -332,7 +332,7 @@ class _EditStoreInfoPageState extends State<EditStoreInfoPage> {
                         ),
                         Switch(
                           value: _isOpen,
-                          activeColor: _kPrimary,
+                          activeThumbColor: _kPrimary,
                           onChanged: (v) => setState(() => _isOpen = v),
                         ),
                       ],

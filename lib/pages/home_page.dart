@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/buyer_location_service.dart';
 import '../services/cart_badge_service.dart';
 import '../services/pickup_preference_service.dart';
 import '../utils/helpers.dart';
@@ -71,6 +72,10 @@ class _HomePageState extends State<HomePage> {
     _searchFocusNode.addListener(_handleSearchFocusChange);
     CartBadgeService.instance.ensureInitialized();
     PickupPreferenceService.instance.ensureInitialized();
+    // Warm the buyer-location cache early so opening a store map renders
+    // the route polyline on the very first frame instead of after a network
+    // round-trip.
+    BuyerLocationService.instance.getPoint();
     _ensureProfile();
     _loadGreetingName();
     fetchProducts();
@@ -912,8 +917,9 @@ class _HomePageState extends State<HomePage> {
 
     // Filter chips
     if (_filterOpenNow) results = results.where(_isShopOpen).toList();
-    if (_filterDelivery)
+    if (_filterDelivery) {
       results = results.where((p) => p['delivery_enabled'] == true).toList();
+    }
     if (_filterCategory.isNotEmpty) {
       results = results
           .where(
@@ -947,8 +953,9 @@ class _HomePageState extends State<HomePage> {
       final joined = raw['seller_profiles'];
       bool sellerDeliveryEnabled = false;
       if (joined is Map) {
-        if (joined['store_name'] != null)
+        if (joined['store_name'] != null) {
           storeName = joined['store_name'].toString();
+        }
         sellerIsOpen = joined['is_open'] == true;
         sellerOpenTime = joined['opening_time']?.toString() ?? '05:00';
         sellerCloseTime = joined['closing_time']?.toString() ?? '19:00';
@@ -1032,8 +1039,9 @@ class _HomePageState extends State<HomePage> {
 
   /// Returns true if the seller's shop is currently open (manual toggle + within hours)
   bool _isShopOpen(dynamic product) {
-    if (product['is_db'] != true)
+    if (product['is_db'] != true) {
       return true; // fallback products are always "open"
+    }
     final isOpen = product['seller_is_open'] == true;
     if (!isOpen) return false;
     try {
@@ -1107,26 +1115,27 @@ class _HomePageState extends State<HomePage> {
   Widget _buildDeliveryBadge(dynamic product) {
     if (product['is_db'] != true) return const SizedBox.shrink();
     final delivery = product['delivery_enabled'] == true;
-    if (!delivery) return const SizedBox.shrink();
+    final color = delivery
+        ? const Color(0xFF2A4BA0)
+        : const Color(0xFFB45309);
+    final icon =
+        delivery ? Icons.delivery_dining_rounded : Icons.storefront_rounded;
+    final label = delivery ? 'Delivery' : 'Pickup only';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
       decoration: BoxDecoration(
-        color: const Color(0xFF2A4BA0).withValues(alpha: 0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
-        children: const [
-          Icon(
-            Icons.delivery_dining_rounded,
-            size: 9,
-            color: Color(0xFF2A4BA0),
-          ),
-          SizedBox(width: 3),
+        children: [
+          Icon(icon, size: 9, color: color),
+          const SizedBox(width: 3),
           Text(
-            'Delivery',
+            label,
             style: TextStyle(
-              color: Color(0xFF2A4BA0),
+              color: color,
               fontSize: 9,
               fontWeight: FontWeight.w700,
             ),
@@ -1170,35 +1179,8 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
         ),
-        if (deliveryEnabled) ...[
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-            decoration: BoxDecoration(
-              color: const Color(0xFF2A4BA0).withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.delivery_dining_rounded,
-                  size: 10,
-                  color: Color(0xFF2A4BA0),
-                ),
-                SizedBox(width: 3),
-                Text(
-                  'Delivery',
-                  style: TextStyle(
-                    color: Color(0xFF2A4BA0),
-                    fontSize: 9,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+        const SizedBox(width: 8),
+        _FulfillmentChip(deliveryEnabled: deliveryEnabled),
       ],
     );
   }
@@ -1238,6 +1220,15 @@ class _HomePageState extends State<HomePage> {
     final imageUrl = product['image_url']?.toString();
     final storeName = _storeName(product, 'Market Stall');
     final unitType = (product['unit_type'] ?? 'kg').toString();
+
+    if (sellerId != null && sellerId == user.id) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("You can't order from your own shop."),
+        ),
+      );
+      return;
+    }
 
     try {
       Map<String, dynamic>? existing;
@@ -1756,7 +1747,7 @@ class _HomePageState extends State<HomePage> {
                                 Image.network(
                                   bannerUrl,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) =>
+                                  errorBuilder: (_, _, _) =>
                                       const SizedBox(),
                                 ),
                               Container(
@@ -1787,7 +1778,7 @@ class _HomePageState extends State<HomePage> {
                                           child: Image.network(
                                             logoUrl,
                                             fit: BoxFit.cover,
-                                            errorBuilder: (_, __, ___) =>
+                                            errorBuilder: (_, _, _) =>
                                                 Container(
                                                   color: Colors.white24,
                                                   child: const Icon(
@@ -2098,7 +2089,12 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildSectionHeader(String title, String subtitle, {String? eyebrow}) {
+  Widget _buildSectionHeader(
+    String title,
+    String subtitle, {
+    String? eyebrow,
+    VoidCallback? onSeeAll,
+  }) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -2149,27 +2145,47 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
         ),
-        TextButton(
-          onPressed: () {},
-          style: TextButton.styleFrom(
-            foregroundColor: const Color(0xFF2A4BA0),
-            backgroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-              side: const BorderSide(color: Color(0xFFE5EAF5)),
+        if (onSeeAll != null)
+          TextButton(
+            onPressed: onSeeAll,
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF2A4BA0),
+              backgroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: const BorderSide(color: Color(0xFFE5EAF5)),
+              ),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('See all', style: TextStyle(fontWeight: FontWeight.w800)),
+                SizedBox(width: 4),
+                Icon(Icons.arrow_forward_rounded, size: 16),
+              ],
             ),
           ),
-          child: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('See all', style: TextStyle(fontWeight: FontWeight.w800)),
-              SizedBox(width: 4),
-              Icon(Icons.arrow_forward_rounded, size: 16),
-            ],
-          ),
-        ),
       ],
+    );
+  }
+
+  void _openFullProductList(String title, List<dynamic> products) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _HomeProductsListPage(
+          title: title,
+          products: products,
+          onTapProduct: _openProductDetail,
+          onAddToCart: _addToCart,
+          productNameOf: (p) => _productName(p, 'Fresh Item'),
+          storeNameOf: (p) => _storeName(p, 'Market Stall'),
+          categoryLabelOf: _categoryLabel,
+          categoryColorOf: _categoryColor,
+          isShopOpenOf: _isShopOpen,
+        ),
+      ),
     );
   }
 
@@ -2658,6 +2674,10 @@ class _HomePageState extends State<HomePage> {
                   'Today\'s Picks',
                   'Fresh finds from open stalls and ready-to-go vendors',
                   eyebrow: 'FRESH NOW',
+                  onSeeAll: () => _openFullProductList(
+                    "Today's Picks",
+                    todayPickProducts,
+                  ),
                 ),
                 const SizedBox(height: 14),
                 SizedBox(
@@ -2681,6 +2701,10 @@ class _HomePageState extends State<HomePage> {
                   'Recommended',
                   'Popular finds shoppers are browsing around the plaza',
                   eyebrow: 'FOR YOU',
+                  onSeeAll: () => _openFullProductList(
+                    'Recommended',
+                    filteredProducts,
+                  ),
                 ),
                 const SizedBox(height: 14),
                 SizedBox(
@@ -2732,6 +2756,10 @@ class _HomePageState extends State<HomePage> {
                   'Daily Essentials',
                   'Everyday staples from trusted plaza vendors',
                   eyebrow: 'STAPLES',
+                  onSeeAll: () => _openFullProductList(
+                    'Daily Essentials',
+                    filteredProducts,
+                  ),
                 ),
                 const SizedBox(height: 14),
                 _buildEssentialsGrid(filteredProducts),
@@ -3095,6 +3123,312 @@ class _PressableCardState extends State<PressableCard> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Full-screen grid view used by the "See all" buttons on the home page.
+/// Renders the same product cards as the home grid so the experience feels
+/// continuous when the user drills in from a section.
+class _HomeProductsListPage extends StatelessWidget {
+  const _HomeProductsListPage({
+    required this.title,
+    required this.products,
+    required this.onTapProduct,
+    required this.onAddToCart,
+    required this.productNameOf,
+    required this.storeNameOf,
+    required this.categoryLabelOf,
+    required this.categoryColorOf,
+    required this.isShopOpenOf,
+  });
+
+  final String title;
+  final List<dynamic> products;
+  final void Function(dynamic product) onTapProduct;
+  final void Function(dynamic product) onAddToCart;
+  final String Function(dynamic product) productNameOf;
+  final String Function(dynamic product) storeNameOf;
+  final String Function(dynamic product) categoryLabelOf;
+  final Color? Function(String label) categoryColorOf;
+  final bool Function(dynamic product) isShopOpenOf;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F6FB),
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF111827),
+        elevation: 0,
+        title: Text(
+          title,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+      ),
+      body: products.isEmpty
+          ? const Center(
+              child: Padding(
+                padding: EdgeInsets.all(32),
+                child: Text(
+                  'Nothing here yet — check back soon.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0xFF6B7280)),
+                ),
+              ),
+            )
+          : GridView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 22),
+              itemCount: products.length,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                mainAxisExtent: 260,
+              ),
+              itemBuilder: (context, index) {
+                final product = products[index];
+                final imageUrl =
+                    (product['image_url'] as String?)?.trim() ?? '';
+                final priceValue = product['price'];
+                final unit = (product['unit_type'] ?? 'kg').toString();
+                final priceText =
+                    priceValue != null ? '₱$priceValue /$unit' : '₱0';
+                final categoryLabel = categoryLabelOf(product);
+                final isOpen = isShopOpenOf(product);
+
+                return PressableCard(
+                  onTap: () => onTapProduct(product),
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: const Color(0xFFE8EDF6)),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x120F172A),
+                          blurRadius: 18,
+                          offset: Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ClipRRect(
+                          borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(20),
+                          ),
+                          child: SizedBox(
+                            width: double.infinity,
+                            height: 114,
+                            child: _ProductThumb(imageUrl: imageUrl),
+                          ),
+                        ),
+                        Expanded(
+                          child: Padding(
+                            padding:
+                                const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        productNameOf(product),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 14,
+                                          color: Color(0xFF111827),
+                                        ),
+                                      ),
+                                    ),
+                                    if (categoryLabel.isNotEmpty) ...[
+                                      const SizedBox(width: 6),
+                                      CategoryPill(
+                                        label: categoryLabel,
+                                        color: categoryColorOf(categoryLabel),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  storeNameOf(product),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Color(0xFF6B7280),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: isOpen
+                                        ? const Color(0xFFE6F6EC)
+                                        : const Color(0xFFFDECEC),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        width: 6,
+                                        height: 6,
+                                        decoration: BoxDecoration(
+                                          color: isOpen
+                                              ? const Color(0xFF1F9D4D)
+                                              : const Color(0xFFD23B3B),
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 5),
+                                      Text(
+                                        isOpen ? 'Open' : 'Closed',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w800,
+                                          color: isOpen
+                                              ? const Color(0xFF1F6F3A)
+                                              : const Color(0xFFA12121),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Spacer(),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        priceText,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w900,
+                                          color: Color(0xFF111827),
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ),
+                                    InkWell(
+                                      onTap: () => onAddToCart(product),
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: Container(
+                                        width: 34,
+                                        height: 34,
+                                        decoration: const BoxDecoration(
+                                          color: Color(0xFF2A4BA0),
+                                          borderRadius: BorderRadius.all(
+                                            Radius.circular(12),
+                                          ),
+                                        ),
+                                        child: const Icon(
+                                          Icons.add_rounded,
+                                          color: Colors.white,
+                                          size: 18,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+    );
+  }
+}
+
+class _ProductThumb extends StatelessWidget {
+  const _ProductThumb({required this.imageUrl});
+
+  final String imageUrl;
+
+  bool _isAsset(String p) => p.startsWith('assets/') || p.startsWith('images/');
+
+  @override
+  Widget build(BuildContext context) {
+    Widget placeholder() => Container(
+          color: const Color(0xFFF1F3F9),
+          child: const Center(
+            child: Icon(
+              Icons.image_outlined,
+              size: 36,
+              color: Color(0xFFB6BDCC),
+            ),
+          ),
+        );
+
+    if (imageUrl.isEmpty) return placeholder();
+    if (_isAsset(imageUrl)) {
+      return Image.asset(
+        imageUrl,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => placeholder(),
+      );
+    }
+    return Image.network(
+      imageUrl,
+      fit: BoxFit.cover,
+      loadingBuilder: (_, child, progress) =>
+          progress == null ? child : placeholder(),
+      errorBuilder: (_, _, _) => placeholder(),
+    );
+  }
+}
+
+/// Pill chip showing whether a shop supports delivery or is pickup-only.
+class _FulfillmentChip extends StatelessWidget {
+  const _FulfillmentChip({required this.deliveryEnabled});
+
+  final bool deliveryEnabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = deliveryEnabled
+        ? const Color(0xFF2A4BA0)
+        : const Color(0xFFB45309);
+    final icon = deliveryEnabled
+        ? Icons.delivery_dining_rounded
+        : Icons.storefront_rounded;
+    final label = deliveryEnabled ? 'Delivery' : 'Pickup only';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 10, color: color),
+          const SizedBox(width: 3),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 9,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
       ),
     );
   }

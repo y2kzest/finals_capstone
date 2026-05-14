@@ -83,7 +83,7 @@ class PaymongoService {
 
 enum PaymongoWalletMethod {
   gcash('gcash', 'GCash'),
-  maya('paymaya', 'Maya'),
+  maya('maya', 'Maya'),
   grabPay('grab_pay', 'GrabPay');
 
   const PaymongoWalletMethod(this.apiValue, this.label);

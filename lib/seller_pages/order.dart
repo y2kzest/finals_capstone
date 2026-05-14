@@ -795,7 +795,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     final deliveryLng = (o['delivery_lng'] as num?)?.toDouble();
     final storeLat = (o['store_lat'] as num?)?.toDouble();
     final storeLng = (o['store_lng'] as num?)?.toDouble();
-    final textScale = MediaQuery.textScaleFactorOf(context).clamp(1.0, 1.6);
+    final textScale = MediaQuery.textScalerOf(context).scale(1.0).clamp(1.0, 1.6);
     final actionHeight = 48 + ((textScale - 1) * 16);
 
     return Container(

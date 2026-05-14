@@ -83,9 +83,21 @@ class _EditStallLocationPageState extends State<EditStallLocationPage> {
         _snack('Location permission denied.');
         return;
       }
+      // Use the last known fix first so the pin snaps somewhere useful
+      // immediately, then upgrade with a fresh high-accuracy lock.
+      try {
+        final last = await Geolocator.getLastKnownPosition();
+        if (last != null && mounted) {
+          final approx = LatLng(last.latitude, last.longitude);
+          setState(() => _pin = approx);
+          _mapController.move(approx, 18);
+        }
+      } catch (_) {}
+
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 8),
         ),
       );
       final next = LatLng(pos.latitude, pos.longitude);
