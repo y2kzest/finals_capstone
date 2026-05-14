@@ -30,6 +30,9 @@ dependencies:
   geolocator: ^13.0.2
   url_launcher: ^6.3.1
 
+  # PayMongo in-app checkout WebView
+  webview_flutter: ^4.10.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -48,6 +51,7 @@ flutter:
 
   assets:
     - .env
+    - assets/quickcartwhitelogo.png
     - assets/img/
     - assets/img/categories/
     - assets/img/banner image/

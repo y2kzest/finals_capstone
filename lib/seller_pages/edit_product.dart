@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../utils/product_variants.dart';
+import '../utils/variant_builder.dart';
 
 const Color _kPrimary = Color(0xFF2A4BA0);
 const Color _kSurface = Color(0xFFF5F6FB);
@@ -23,7 +25,7 @@ class _EditProductPageState extends State<EditProductPage> {
   late final TextEditingController retailPriceCtrl;
   late final TextEditingController stockCtrl;
   late final TextEditingController descriptionCtrl;
-  late final TextEditingController variantsCtrl;
+  List<ProductVariant> _variants = [];
   late final TextEditingController prepTimeCtrl;
 
   late String selectedCategory;
@@ -70,8 +72,7 @@ class _EditProductPageState extends State<EditProductPage> {
         text: (p['stock_quantity'] as num?)?.toString() ?? '');
     descriptionCtrl = TextEditingController(
         text: p['description']?.toString() ?? '');
-    variantsCtrl = TextEditingController(
-      text: p['variants']?.toString() ?? '');
+    _variants = parseVariants(p['variants']?.toString());
     prepTimeCtrl = TextEditingController(
       text: p['prep_time']?.toString() ?? '');
 
@@ -117,7 +118,6 @@ class _EditProductPageState extends State<EditProductPage> {
     retailPriceCtrl.dispose();
     stockCtrl.dispose();
     descriptionCtrl.dispose();
-    variantsCtrl.dispose();
     prepTimeCtrl.dispose();
     super.dispose();
   }
@@ -234,8 +234,7 @@ class _EditProductPageState extends State<EditProductPage> {
       'image_urls': allImages,
       'product_type': isKarinderya ? 'karinderya' : 'retail',
       if (isKarinderya) 'pricing_basis': selectedPricingBasis,
-      if (isKarinderya && variantsCtrl.text.trim().isNotEmpty)
-        'variants': variantsCtrl.text.trim(),
+      'variants': _variants.isNotEmpty ? encodeVariants(_variants) : null,
       if (isKarinderya && prepTimeCtrl.text.trim().isNotEmpty)
         'prep_time': prepTimeCtrl.text.trim(),
       if (isKarinderya) 'daily_available': dailyAvailable,
@@ -393,12 +392,6 @@ class _EditProductPageState extends State<EditProductPage> {
                         icon: Icons.schedule_rounded,
                       ),
                       const SizedBox(height: 14),
-                      _modernField(
-                        label: 'Variants (optional, e.g. With rice / Without rice)',
-                        controller: variantsCtrl,
-                        icon: Icons.tune_rounded,
-                      ),
-                      const SizedBox(height: 14),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                         decoration: BoxDecoration(
@@ -480,6 +473,11 @@ class _EditProductPageState extends State<EditProductPage> {
                         )),
                       ]),
                     ],
+                    const SizedBox(height: 20),
+                    VariantBuilderField(
+                      initialVariants: _variants,
+                      onChanged: (v) => setState(() => _variants = v),
+                    ),
                     const SizedBox(height: 32),
 
                     SizedBox(

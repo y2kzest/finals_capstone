@@ -1,9 +1,14 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
 import 'fill_profile.dart'; // Contains BusinessProfileScreen
 import 'package:file_picker/file_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../utils/market_geo.dart';
 
 // Defined constants for consistent design
 const Color kPrimaryBlue = Color(0xFF2A4BA0);
@@ -24,8 +29,9 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
   final TextEditingController _storeNameController = TextEditingController(
     text: '',
   );
-  final TextEditingController _stallNumberController = TextEditingController();
+  final TextEditingController _storeAddressController = TextEditingController();
   final TextEditingController _marketSectionController = TextEditingController();
+  LatLng? _pin;
   int _permitCount = 0;
   bool _hasBankAccount = false;
   String? _logoUrl;
@@ -48,7 +54,7 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
   @override
   void dispose() {
     _storeNameController.dispose();
-    _stallNumberController.dispose();
+    _storeAddressController.dispose();
     _marketSectionController.dispose();
     super.dispose();
   }
@@ -312,7 +318,9 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
         'full_name': fullName,
         'store_name': _storeNameController.text,
         'category': _selectedBusinessCategory,
-        'stall_number': _stallNumberController.text.trim().isEmpty ? null : _stallNumberController.text.trim(),
+        'store_address': _storeAddressController.text.trim().isEmpty ? null : _storeAddressController.text.trim(),
+        'stall_lat': _pin?.latitude,
+        'stall_lng': _pin?.longitude,
         'market_section': _marketSectionController.text.trim().isEmpty ? null : _marketSectionController.text.trim(),
         'has_bank_account': _hasBankAccount,
         'permit_count': _permitCount,
@@ -809,28 +817,38 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
               icon: Icons.storefront_outlined,
             ),
 
-            // Stall number & market section
-            Row(
-              children: [
-                Expanded(
-                  child: _buildInputField(
-                    label: "Stall Number",
-                    controller: _stallNumberController,
-                    hint: "e.g. A-12",
-                    icon: Icons.tag_rounded,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildInputField(
-                    label: "Market Section",
-                    controller: _marketSectionController,
-                    hint: "e.g. Wet Market, Dry Goods",
-                    icon: Icons.grid_view_rounded,
-                  ),
-                ),
-              ],
+            // Store address (full)
+            _buildInputField(
+              label: "Store Address",
+              controller: _storeAddressController,
+              hint: "Street, barangay, city",
+              icon: Icons.location_on_outlined,
             ),
+
+            // Market section
+            _buildInputField(
+              label: "Market Section",
+              controller: _marketSectionController,
+              hint: "e.g. Wet Market, Dry Goods",
+              icon: Icons.grid_view_rounded,
+            ),
+
+            // Pin location on map
+            const Text(
+              "Pin Store Location",
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              "Drop a pin on the map so buyers can find you.",
+              style: TextStyle(color: kTextGrey, fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            _StorePinPickerField(
+              pin: _pin,
+              onPicked: (p) => setState(() => _pin = p),
+            ),
+            const SizedBox(height: 20),
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -1101,6 +1119,180 @@ class _ListItem extends StatelessWidget {
             if (showRightArrow) // Conditionally show arrow
               const Icon(Icons.chevron_right, color: kTextGrey, size: 20),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// Map pin picker field used by the seller application form.
+class _StorePinPickerField extends StatefulWidget {
+  const _StorePinPickerField({required this.pin, required this.onPicked});
+
+  final LatLng? pin;
+  final ValueChanged<LatLng> onPicked;
+
+  @override
+  State<_StorePinPickerField> createState() => _StorePinPickerFieldState();
+}
+
+class _StorePinPickerFieldState extends State<_StorePinPickerField> {
+  final _mapController = MapController();
+  bool _isLocating = false;
+
+  LatLng get _effectivePin => widget.pin ?? kMarketPlaza;
+
+  Future<void> _useCurrentLocation() async {
+    setState(() => _isLocating = true);
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) {
+        _snack('Turn on device location to use GPS.');
+        return;
+      }
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        _snack('Location permission denied.');
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+      final next = LatLng(pos.latitude, pos.longitude);
+      if (!mounted) return;
+      widget.onPicked(next);
+      _mapController.move(next, 18);
+    } catch (e) {
+      _snack('Could not get location: $e');
+    } finally {
+      if (mounted) setState(() => _isLocating = false);
+    }
+  }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasPin = widget.pin != null;
+    return TweenAnimationBuilder<double>(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+      tween: Tween(begin: 0.97, end: 1),
+      builder: (_, scale, child) =>
+          Transform.scale(scale: scale, child: child),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: SizedBox(
+          height: 220,
+          child: Stack(
+            children: [
+              FlutterMap(
+                mapController: _mapController,
+                options: MapOptions(
+                  initialCenter: _effectivePin,
+                  initialZoom: 17,
+                  minZoom: 5,
+                  maxZoom: 19,
+                  onTap: (_, latLng) => widget.onPicked(latLng),
+                ),
+                children: [
+                  TileLayer(
+                    urlTemplate:
+                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    userAgentPackageName: 'com.example.caps_finals',
+                    maxNativeZoom: 19,
+                  ),
+                  if (hasPin)
+                    MarkerLayer(
+                      markers: [
+                        Marker(
+                          point: widget.pin!,
+                          width: 48,
+                          height: 48,
+                          alignment: Alignment.topCenter,
+                          child: const Icon(
+                            Icons.location_on,
+                            color: kPrimaryBlue,
+                            size: 44,
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+              Positioned(
+                left: 10,
+                top: 10,
+                right: 10,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x22000000),
+                        blurRadius: 8,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.touch_app_rounded,
+                          color: kPrimaryBlue, size: 16),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          hasPin
+                              ? '${widget.pin!.latitude.toStringAsFixed(5)}, ${widget.pin!.longitude.toStringAsFixed(5)}'
+                              : 'Tap the map to drop a pin',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Positioned(
+                right: 12,
+                bottom: 12,
+                child: FloatingActionButton.small(
+                  heroTag: 'apply-gps',
+                  onPressed: _isLocating ? null : _useCurrentLocation,
+                  backgroundColor: kPrimaryBlue,
+                  foregroundColor: Colors.white,
+                  child: _isLocating
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Icon(Icons.my_location),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

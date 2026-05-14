@@ -2,11 +2,17 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/cart_badge_service.dart';
+import '../services/paymongo_service.dart';
 import '../services/pickup_preference_service.dart';
 import '../utils/helpers.dart';
+import '../utils/distance_badge.dart';
+import '../utils/product_options_sheet.dart';
+import '../utils/store_map_preview.dart';
 import 'addresses_page.dart';
 import 'buyer_messages_page.dart';
 import 'cart_page.dart';
+import 'payment_method_page.dart';
+import 'paymongo_webview_page.dart';
 import 'seller_profile_page.dart';
 
 class ProductViewPage extends StatefulWidget {
@@ -24,7 +30,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
     'delivered',
   ];
 
-  int _quantity = 1;
+  double _quantity = 1.0;
   bool _showReviews = false;
   bool _inWishlist = false;
   String? _sellerLogoUrl;
@@ -41,6 +47,21 @@ class _ProductViewPageState extends State<ProductViewPage> {
   bool _isCheckingReviewEligibility = false;
   int _currentImageIndex = 0;
   late final PageController _imagePageController;
+
+  bool get _shopCurrentlyOpen {
+    if (!_sellerIsOpen) return false;
+    try {
+      final now = TimeOfDay.now();
+      final op = _sellerOpenTime.split(':');
+      final cl = _sellerCloseTime.split(':');
+      final openMin = int.parse(op[0]) * 60 + int.parse(op[1]);
+      final closeMin = int.parse(cl[0]) * 60 + int.parse(cl[1]);
+      final nowMin = now.hour * 60 + now.minute;
+      return nowMin >= openMin && nowMin <= closeMin;
+    } catch (_) {
+      return _sellerIsOpen;
+    }
+  }
 
   String? get _productId {
     final candidates = [widget.product['id'], widget.product['product_id']];
@@ -538,6 +559,20 @@ class _ProductViewPageState extends State<ProductViewPage> {
     return 'KG';
   }
 
+  bool get _isWeightUnit {
+    final u = _unitType.toLowerCase();
+    return u == 'kg' || u == 'g' || u == 'gram' || u == 'grams' ||
+        u == 'lb' || u == 'lbs' || u == 'kilogram' || u == 'kilograms';
+  }
+
+  double get _qtyStep => _isWeightUnit ? 0.5 : 1.0;
+  double get _qtyMin => _isWeightUnit ? 0.5 : 1.0;
+
+  String _formatQty(double qty) {
+    if (qty == qty.truncateToDouble()) return qty.toStringAsFixed(0);
+    return qty.toStringAsFixed(1);
+  }
+
   String _formatPrice(double value) {
     if (value == value.truncateToDouble()) {
       return value.toStringAsFixed(0);
@@ -545,7 +580,47 @@ class _ProductViewPageState extends State<ProductViewPage> {
     return value.toStringAsFixed(2);
   }
 
-  Future<void> _addToCart() async {
+  /// Shown when the buyer taps "Add to Cart" — opens the options sheet first.
+  Future<void> _onAddToCartTapped() async {
+    final result = await showProductOptionsSheet(
+      context: context,
+      product: widget.product,
+      showAddToCart: true,
+      showBuyNow: false,
+    );
+    if (result == null) return;
+    setState(() => _quantity = result.qty);
+    await _addToCart(
+      selectedVariant: result.selectedVariant?.name,
+      note: result.note,
+      price: result.effectivePrice,
+    );
+  }
+
+  /// Shown when the buyer taps "Buy Now" — opens the options sheet, then the
+  /// delivery/pickup confirmation sheet.
+  Future<void> _onBuyNowTapped() async {
+    if (!_shopCurrentlyOpen) return;
+    final result = await showProductOptionsSheet(
+      context: context,
+      product: widget.product,
+      showAddToCart: false,
+      showBuyNow: true,
+    );
+    if (result == null) return;
+    setState(() => _quantity = result.qty);
+    await _buyNow(
+      selectedVariant: result.selectedVariant?.name,
+      initialNote: result.note,
+      price: result.effectivePrice,
+    );
+  }
+
+  Future<void> _addToCart({
+    String? selectedVariant,
+    String? note,
+    double? price,
+  }) async {
     final supabase = Supabase.instance.client;
     final user = supabase.auth.currentUser;
 
@@ -559,35 +634,39 @@ class _ProductViewPageState extends State<ProductViewPage> {
     final productName = _displayName;
     final productId = _productId;
     final sellerId = widget.product['seller_id']?.toString();
+    final effectivePrice = price ?? _priceValue;
 
     try {
-      // Check if this product is already in the cart
+      // Only deduplicate when no variant is selected (different variants are
+      // distinct line-items).
       Map<String, dynamic>? existing;
-      if (productId != null && productId.isNotEmpty) {
-        var query = supabase
-            .from('cart')
-            .select('id, qty')
-            .eq('buyer_id', user.id)
-            .eq('product_id', productId);
-        if (sellerId != null && sellerId.isNotEmpty) {
-          query = query.eq('seller_id', sellerId);
+      if (selectedVariant == null) {
+        if (productId != null && productId.isNotEmpty) {
+          var query = supabase
+              .from('cart')
+              .select('id, qty')
+              .eq('buyer_id', user.id)
+              .eq('product_id', productId);
+          if (sellerId != null && sellerId.isNotEmpty) {
+            query = query.eq('seller_id', sellerId);
+          }
+          existing = await query.maybeSingle();
         }
-        existing = await query.maybeSingle();
-      }
-      if (existing == null) {
-        var fallback = supabase
-            .from('cart')
-            .select('id, qty')
-            .eq('buyer_id', user.id)
-            .eq('product_name', productName);
-        if (sellerId != null && sellerId.isNotEmpty) {
-          fallback = fallback.eq('seller_id', sellerId);
+        if (existing == null) {
+          var fallback = supabase
+              .from('cart')
+              .select('id, qty')
+              .eq('buyer_id', user.id)
+              .eq('product_name', productName);
+          if (sellerId != null && sellerId.isNotEmpty) {
+            fallback = fallback.eq('seller_id', sellerId);
+          }
+          existing = await fallback.maybeSingle();
         }
-        existing = await fallback.maybeSingle();
       }
 
       if (existing != null) {
-        final currentQty = int.tryParse(existing['qty'].toString()) ?? 0;
+        final currentQty = double.tryParse(existing['qty'].toString()) ?? 0;
         await supabase
             .from('cart')
             .update({'qty': currentQty + _quantity})
@@ -596,22 +675,31 @@ class _ProductViewPageState extends State<ProductViewPage> {
       } else {
         await supabase.from('cart').insert({
           'product_name': productName,
-          'price': _priceValue,
+          'price': effectivePrice,
           'qty': _quantity,
           'buyer_id': user.id,
-          'seller_id': widget.product['seller_id']?.toString(),
+          'seller_id': sellerId,
           'product_id': productId,
           'image_url': widget.product['image_url']?.toString(),
           'store_name':
               widget.product['store_name']?.toString() ?? 'Market Stall',
           'unit_type': (widget.product['unit_type'] ?? 'kg').toString(),
+          if (selectedVariant != null && selectedVariant.isNotEmpty)
+            'selected_variant': selectedVariant,
+          if (note != null && note.isNotEmpty) 'buyer_note': note,
         });
       }
 
       if (!mounted) return;
       await CartBadgeService.instance.refreshCount();
+      final variantLabel =
+          selectedVariant != null ? ' ($selectedVariant)' : '';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Added $_quantity $productName to cart!')),
+        SnackBar(
+          content: Text(
+            'Added ${_formatQty(_quantity)} $_unitType $productName$variantLabel to cart!',
+          ),
+        ),
       );
     } on PostgrestException catch (e) {
       if (!mounted) return;
@@ -626,7 +714,11 @@ class _ProductViewPageState extends State<ProductViewPage> {
     }
   }
 
-  Future<void> _buyNow() async {
+  Future<void> _buyNow({
+    String? selectedVariant,
+    String? initialNote,
+    double? price,
+  }) async {
     final supabase = Supabase.instance.client;
     final buyerId = supabase.auth.currentUser?.id;
 
@@ -664,6 +756,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
     final result = await _showOrderConfirmationSheet(
       savedAddress,
       savedAddresses,
+      initialNote: initialNote,
     );
     if (result == null) return; // user dismissed
 
@@ -696,7 +789,27 @@ class _ProductViewPageState extends State<ProductViewPage> {
     try {
       final sellerId = widget.product['seller_id']?.toString();
       final productId = _productId;
-      final total = _priceValue * _quantity;
+      final effectivePrice = price ?? _priceValue;
+      final total = effectivePrice * _quantity;
+
+      // Ask the buyer how they want to pay
+      if (!mounted) return;
+      final paymentChoice = await Navigator.of(context).push<PaymentMethodChoice>(
+        MaterialPageRoute(
+          builder: (_) => PaymentMethodPage(
+            totalAmount: total,
+            itemCount: 1,
+            shopCount: 1,
+          ),
+        ),
+      );
+      if (paymentChoice == null) return;
+      if (!mounted) return;
+
+      final isOnline = paymentChoice.isOnline;
+      final walletMethod = paymentChoice.wallet;
+      final paymentMethodCode = walletMethod?.apiValue ?? 'cod';
+      final initialPaymentStatus = isOnline ? 'pending' : 'paid';
 
       const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
       final rng = Random.secure();
@@ -709,7 +822,9 @@ class _ProductViewPageState extends State<ProductViewPage> {
           .from('orders')
           .insert({
             'product_name': _displayName,
-            'price': _priceValue,
+            'price': effectivePrice,
+            if (selectedVariant != null && selectedVariant.isNotEmpty)
+              'selected_variant': selectedVariant,
             'qty': _quantity,
             'buyer_id': buyerId,
             'seller_id': sellerId,
@@ -722,6 +837,8 @@ class _ProductViewPageState extends State<ProductViewPage> {
             'status': 'pending',
             'pickup_code': pickupCode,
             'order_type': orderType,
+            'payment_method': paymentMethodCode,
+            'payment_status': initialPaymentStatus,
             if (buyerNotes != null && buyerNotes.isNotEmpty)
               'buyer_notes': buyerNotes,
             'allow_substitution': allowSubstitution,
@@ -743,31 +860,118 @@ class _ProductViewPageState extends State<ProductViewPage> {
           })
           .select('id')
           .single();
+      final orderId = orderRes['id'].toString();
 
-      // Notify seller
-      if (sellerId != null && sellerId.isNotEmpty) {
+      // Notify seller \u2014 only for COD orders. Online orders are notified by the
+      // PayMongo webhook after payment confirms.
+      if (!isOnline && sellerId != null && sellerId.isNotEmpty) {
         await supabase.from('seller_notifications').insert({
           'seller_id': sellerId,
           'order_id': orderRes['id'],
           'title': 'New Order!',
           'body':
-              '$_displayName x$_quantity \u2014 \u20b1${total.toStringAsFixed(0)}'
+              '$_displayName x${_formatQty(_quantity)} \u2014 \u20b1${total.toStringAsFixed(0)}'
               '${orderType == 'delivery' ? ' (Delivery)' : ''}',
           'type': 'new_order',
         });
       }
 
+      // COD path \u2014 show success and return
+      if (!isOnline) {
+        if (!mounted) return;
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => _OrderSuccessDialog(
+            orderType: orderType,
+            address: deliveryAddress,
+            pickupTime: orderType == 'pickup' ? pickupTime : null,
+            onDone: () => Navigator.of(ctx).pop(),
+          ),
+        );
+        return;
+      }
+
+      // Online payment path \u2014 create PayMongo source and open WebView
+      final user = supabase.auth.currentUser!;
+      final amountCentavos = (total * 100).round();
+      final buyerEmail = user.email ?? '';
+      final buyerName =
+          (user.userMetadata?['full_name'] as String?)?.trim() ?? '';
+
+      final PaymongoCheckout checkout;
+      try {
+        checkout = await PaymongoService.instance.createWalletCheckout(
+          orderIds: [orderId],
+          method: walletMethod!,
+          amountCentavos: amountCentavos,
+          email: buyerEmail,
+          name: buyerName,
+        );
+      } on PaymongoException catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not start payment: ${e.message}')),
+        );
+        return;
+      }
+
       if (!mounted) return;
-      await showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => _OrderSuccessDialog(
-          orderType: orderType,
-          address: deliveryAddress,
-          pickupTime: orderType == 'pickup' ? pickupTime : null,
-          onDone: () => Navigator.of(ctx).pop(),
+      final webResult = await Navigator.of(context).push<PaymongoWebResult>(
+        MaterialPageRoute(
+          builder: (_) => PaymongoWebViewPage(
+            checkoutUrl: checkout.checkoutUrl,
+            methodLabel: walletMethod.label,
+            pollOrderId: orderId,
+          ),
         ),
       );
+      if (!mounted) return;
+
+      if (webResult == PaymongoWebResult.success) {
+        final finalStatus =
+            await PaymongoService.instance.waitForPaymentResult(orderId);
+        if (!mounted) return;
+        if (finalStatus == 'paid') {
+          await showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (ctx) => _OrderSuccessDialog(
+              orderType: orderType,
+              address: deliveryAddress,
+              pickupTime: orderType == 'pickup' ? pickupTime : null,
+              onDone: () => Navigator.of(ctx).pop(),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Payment received. Confirming with the bank \u2014 check Orders in a moment.',
+              ),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      } else if (webResult == PaymongoWebResult.failed) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Payment was declined. Your order is saved \u2014 try again from Orders.',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Payment cancelled. Your order is saved \u2014 you can pay later from Orders.',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     } on PostgrestException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -786,8 +990,9 @@ class _ProductViewPageState extends State<ProductViewPage> {
   /// Returns a map with 'order_type', optional 'delivery_address', optional 'new_address'.
   Future<Map<String, dynamic>?> _showOrderConfirmationSheet(
     String savedAddress,
-    List<Map<String, dynamic>> savedAddresses,
-  ) async {
+    List<Map<String, dynamic>> savedAddresses, {
+    String? initialNote,
+  }) async {
     String selected = _sellerDeliveryEnabled ? 'delivery' : 'pickup';
 
     // Determine initial selected address
@@ -802,11 +1007,11 @@ class _ProductViewPageState extends State<ProductViewPage> {
     final addrCtrl = TextEditingController(
       text: savedAddresses.isEmpty ? savedAddress : '',
     );
-    final notesCtrl = TextEditingController();
+    final notesCtrl = TextEditingController(text: initialNote ?? '');
     final weightCtrl = TextEditingController();
     bool allowSubstitution = false;
     final bool isByWeight = widget.product['is_by_weight'] == true;
-    int qty = _quantity;
+    double qty = _quantity;
     String? pickupTime = PickupPreferenceService.instance.currentValue;
 
     final result = await showModalBottomSheet<Map<String, dynamic>>(
@@ -932,14 +1137,14 @@ class _ProductViewPageState extends State<ProductViewPage> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     _sheetQtyBtn(Icons.remove, () {
-                                      if (qty > 1) setModal(() => qty--);
+                                      if (qty > _qtyMin) setModal(() => qty -= _qtyStep);
                                     }),
                                     Padding(
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 10,
                                       ),
                                       child: Text(
-                                        '$qty',
+                                        _formatQty(qty),
                                         style: const TextStyle(
                                           fontWeight: FontWeight.w800,
                                           fontSize: 14,
@@ -948,7 +1153,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
                                     ),
                                     _sheetQtyBtn(
                                       Icons.add,
-                                      () => setModal(() => qty++),
+                                      () => setModal(() => qty += _qtyStep),
                                     ),
                                   ],
                                 ),
@@ -1497,7 +1702,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
 
     if (!mounted) return result;
     if (result != null && result.containsKey('qty')) {
-      setState(() => _quantity = result['qty'] as int);
+      setState(() => _quantity = (result['qty'] as num).toDouble());
     }
     return result;
   }
@@ -2216,8 +2421,25 @@ class _ProductViewPageState extends State<ProductViewPage> {
                                   ),
                                 ),
                               ),
+                              if (_storeLat != null && _storeLng != null) ...[
+                                const SizedBox(width: 8),
+                                DistanceBadge(
+                                  storeLat: _storeLat!,
+                                  storeLng: _storeLng!,
+                                  compact: true,
+                                ),
+                              ],
                             ],
                           ),
+                          if (_storeLat != null && _storeLng != null) ...[
+                            const SizedBox(height: 10),
+                            StoreMapPreview(
+                              lat: _storeLat!,
+                              lng: _storeLng!,
+                              address: _storeAddress,
+                              storeName: _sellerName,
+                            ),
+                          ],
                           const SizedBox(height: 10),
                           Row(
                             children: [
@@ -2334,16 +2556,16 @@ class _ProductViewPageState extends State<ProductViewPage> {
                       _qtyButton(
                         icon: Icons.remove,
                         onTap: () {
-                          if (_quantity == 1) return;
+                          if (_quantity <= _qtyMin) return;
                           setState(() {
-                            _quantity -= 1;
+                            _quantity -= _qtyStep;
                           });
                         },
                       ),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         child: Text(
-                          '$_quantity',
+                          _formatQty(_quantity),
                           style: const TextStyle(
                             fontSize: 17,
                             fontWeight: FontWeight.w700,
@@ -2354,7 +2576,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
                         icon: Icons.add,
                         onTap: () {
                           setState(() {
-                            _quantity += 1;
+                            _quantity += _qtyStep;
                           });
                         },
                       ),
@@ -2373,7 +2595,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
                     children: [
                       Expanded(
                         child: OutlinedButton(
-                          onPressed: _addToCart,
+                          onPressed: _onAddToCartTapped,
                           style: OutlinedButton.styleFrom(
                             side: const BorderSide(color: Color(0xFF1A3C8C)),
                             padding: const EdgeInsets.symmetric(vertical: 14),
@@ -2392,19 +2614,38 @@ class _ProductViewPageState extends State<ProductViewPage> {
                       ),
                       const SizedBox(width: 10),
                       Expanded(
-                        child: ElevatedButton(
-                          onPressed: _buyNow,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF1A3C8C),
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
-                            ),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 220),
+                          curve: Curves.easeOut,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(30),
                           ),
-                          child: const Text(
-                            'Buy Now',
-                            style: TextStyle(fontWeight: FontWeight.w700),
+                          child: ElevatedButton(
+                            onPressed: _shopCurrentlyOpen ? _onBuyNowTapped : null,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _shopCurrentlyOpen
+                                  ? const Color(0xFF1A3C8C)
+                                  : const Color(0xFFB0B8C4),
+                              foregroundColor: Colors.white,
+                              disabledBackgroundColor: const Color(0xFFB0B8C4),
+                              disabledForegroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(30),
+                              ),
+                            ),
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 220),
+                              transitionBuilder: (child, anim) => FadeTransition(
+                                opacity: anim,
+                                child: ScaleTransition(scale: anim, child: child),
+                              ),
+                              child: Text(
+                                _shopCurrentlyOpen ? 'Buy Now' : 'Store Closed',
+                                key: ValueKey(_shopCurrentlyOpen),
+                                style: const TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                            ),
                           ),
                         ),
                       ),

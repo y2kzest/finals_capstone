@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/cart_badge_service.dart';
 import '../services/pickup_preference_service.dart';
 import '../utils/helpers.dart';
 import 'cart_page.dart';
+import 'orders_page.dart';
 import 'productdet.dart';
 
 class HomePage extends StatefulWidget {
@@ -29,14 +32,37 @@ class _HomePageState extends State<HomePage> {
   List<Map<String, dynamic>> _banners = [];
   late final PageController _bannerController;
   int _activeBannerIndex = 0;
+  RealtimeChannel? _notifChannel;
+  final Set<String> _seenNotifIds = {};
 
-  static const List<String> _pickupWindows = [
-    'Today, all day',
-    'Morning (5AM–12PM)',
-    'Afternoon (12PM–5PM)',
-    'Evening (5PM–7PM)',
-    'Tomorrow, all day',
-  ];
+  TimeOfDay _parsePickupTime(String time) {
+    final normalized = time.trim().toLowerCase();
+    if (normalized.contains('morning')) return const TimeOfDay(hour: 9, minute: 0);
+    if (normalized.contains('afternoon')) return const TimeOfDay(hour: 14, minute: 0);
+    if (normalized.contains('evening')) return const TimeOfDay(hour: 18, minute: 0);
+    if (normalized.contains('all day') || normalized.contains('tomorrow')) {
+      return const TimeOfDay(hour: 10, minute: 0);
+    }
+    try {
+      final parts = time.split(' ');
+      final hm = parts[0].split(':');
+      int hour = int.parse(hm[0]);
+      final minute = int.parse(hm[1]);
+      final isPm = parts.length > 1 && parts[1].toUpperCase() == 'PM';
+      if (isPm && hour != 12) hour += 12;
+      if (!isPm && hour == 12) hour = 0;
+      return TimeOfDay(hour: hour, minute: minute);
+    } catch (_) {
+      return TimeOfDay.now();
+    }
+  }
+
+  String _formatPickupTime(TimeOfDay t) {
+    final hour = t.hourOfPeriod == 0 ? 12 : t.hourOfPeriod;
+    final minute = t.minute.toString().padLeft(2, '0');
+    final period = t.period == DayPeriod.am ? 'AM' : 'PM';
+    return '$hour:$minute $period';
+  }
 
   @override
   void initState() {
@@ -50,6 +76,110 @@ class _HomePageState extends State<HomePage> {
     fetchProducts();
     _fetchNotifications();
     _fetchBanners();
+    _subscribeToNotifications();
+  }
+
+  void _subscribeToNotifications() {
+    final client = Supabase.instance.client;
+    final user = client.auth.currentUser;
+    if (user == null) return;
+    _notifChannel?.unsubscribe();
+    _notifChannel = client
+        .channel('public:notifications:user_${user.id}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'notifications',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: user.id,
+          ),
+          callback: (payload) {
+            final row = payload.newRecord;
+            final id = row['id']?.toString();
+            if (id == null || _seenNotifIds.contains(id)) return;
+            _seenNotifIds.add(id);
+            if (mounted) {
+              setState(() => _notifications.insert(0, row));
+              _showNotificationToast(row);
+            }
+          },
+        )
+        ..subscribe();
+  }
+
+  void _showNotificationToast(Map<String, dynamic> n) {
+    if (!mounted) return;
+    final title = (n['title']?.toString().trim().isNotEmpty == true)
+        ? n['title'].toString()
+        : _notifTitle(n['type']?.toString() ?? '');
+    final message = n['message']?.toString() ?? '';
+    final accent = _notifColor(n['type']?.toString() ?? '');
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: const Color(0xFF111827),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          content: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  _notifIcon(n['type']?.toString() ?? ''),
+                  color: accent,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13.5,
+                        color: Colors.white,
+                      ),
+                    ),
+                    if (message.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        message,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFFE5E7EB),
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+          action: SnackBarAction(
+            label: 'View',
+            textColor: Colors.white,
+            onPressed: () => _handleNotificationTap(n),
+          ),
+        ),
+      );
   }
 
   void _handleSearchFocusChange() {
@@ -60,71 +190,20 @@ class _HomePageState extends State<HomePage> {
     await ensureOwnProfileRow(Supabase.instance.client);
   }
 
-  void _showPickupWindowSheet() {
-    showModalBottomSheet(
+  Future<void> _showPickupWindowSheet() async {
+    final current = PickupPreferenceService.instance.currentValue;
+    final initial = _parsePickupTime(current);
+    final picked = await showTimePicker(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      initialTime: initial,
+      helpText: 'Preferred pickup time',
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: false),
+        child: child!,
       ),
-      builder: (_) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[300],
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 14),
-              const Text(
-                'Select Pickup Window',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Sellers will see your preferred pickup schedule',
-                style: TextStyle(fontSize: 12, color: Colors.grey),
-              ),
-              const SizedBox(height: 14),
-              ..._pickupWindows.map((w) {
-                final selected = w == PickupPreferenceService.instance.currentValue;
-                return ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    selected
-                        ? Icons.radio_button_checked
-                        : Icons.radio_button_unchecked,
-                    color: selected ? const Color(0xFF2A4BA0) : Colors.grey,
-                  ),
-                  title: Text(
-                    w,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                      color: selected
-                          ? const Color(0xFF2A4BA0)
-                          : Colors.black87,
-                    ),
-                  ),
-                  onTap: () {
-                    Navigator.pop(context);
-                    PickupPreferenceService.instance.save(w);
-                  },
-                );
-              }),
-            ],
-          ),
-        );
-      },
     );
+    if (picked == null) return;
+    await PickupPreferenceService.instance.save(_formatPickupTime(picked));
   }
 
   @override
@@ -133,7 +212,51 @@ class _HomePageState extends State<HomePage> {
     _searchFocusNode.removeListener(_handleSearchFocusChange);
     _searchFocusNode.dispose();
     _searchController.dispose();
+    _notifChannel?.unsubscribe();
     super.dispose();
+  }
+
+  Future<void> _handleNotificationTap(Map<String, dynamic> n) async {
+    final id = n['id']?.toString();
+    final type = n['type']?.toString() ?? '';
+
+    // Mark this notification as read.
+    if (id != null && id.isNotEmpty && n['is_read'] != true) {
+      try {
+        await Supabase.instance.client
+            .from('notifications')
+            .update({'is_read': true})
+            .eq('id', id);
+        if (mounted) {
+          setState(() {
+            final i = _notifications.indexWhere((x) => x['id']?.toString() == id);
+            if (i >= 0) _notifications[i] = {..._notifications[i], 'is_read': true};
+          });
+        }
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+
+    // Order-related notifications open the Orders page.
+    const orderTypes = {
+      'order_placed',
+      'order_pending_payment',
+      'order_accepted',
+      'order_ready',
+      'order_out_for_delivery',
+      'order_completed',
+      'order_declined',
+      'order_cancelled',
+      'payment_received',
+    };
+    if (orderTypes.contains(type)) {
+      Navigator.of(context).pop(); // close the notifications sheet
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const OrdersPage()),
+      );
+    }
   }
 
   Future<void> _fetchNotifications() async {
@@ -148,7 +271,15 @@ class _HomePageState extends State<HomePage> {
           .order('created_at', ascending: false)
           .limit(20);
       if (mounted) {
-        setState(() => _notifications = List<Map<String, dynamic>>.from(resp));
+        final rows = List<Map<String, dynamic>>.from(resp);
+        // Seed seen IDs so existing rows don't trigger a popup when the
+        // realtime channel first connects.
+        _seenNotifIds
+          ..clear()
+          ..addAll(rows
+              .map((r) => r['id']?.toString())
+              .whereType<String>());
+        setState(() => _notifications = rows);
       }
     } catch (_) {
       // notifications table may not exist yet
@@ -452,8 +583,13 @@ class _HomePageState extends State<HomePage> {
                                     ),
                                   ],
                                 ),
-                                child: IntrinsicHeight(
-                                  child: Row(
+                                clipBehavior: Clip.antiAlias,
+                                child: Material(
+                                  color: Colors.transparent,
+                                  child: InkWell(
+                                    onTap: () => _handleNotificationTap(n),
+                                    child: IntrinsicHeight(
+                                      child: Row(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.stretch,
                                     children: [
@@ -588,6 +724,8 @@ class _HomePageState extends State<HomePage> {
                                         ),
                                       ),
                                     ],
+                                  ),
+                                    ),
                                   ),
                                 ),
                               ),

@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../seller_pages/edit_store_info.dart';
 import '../utils/marketplace_ui.dart';
+import '../utils/distance_badge.dart';
+import '../utils/market_geo.dart';
+import '../utils/page_transitions.dart';
+import '../utils/store_map_preview.dart';
 import 'buyer_messages_page.dart';
 import 'productdet.dart';
 
@@ -60,7 +65,8 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
           .select(
             'store_name, store_information_final, logo_url, cover_url, '
             'description, is_open, opening_time, closing_time, '
-            'store_address, delivery_enabled, official_contact_email',
+            'store_address, delivery_enabled, official_contact_email, '
+            'stall_lat, stall_lng',
           )
           .eq('user_id', widget.sellerId)
           .maybeSingle();
@@ -273,6 +279,8 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
     final description = _profile?['description']?.toString().trim() ?? '';
     final address = _profile?['store_address']?.toString().trim() ?? '';
     final email = _profile?['official_contact_email']?.toString().trim() ?? '';
+    final storeLat = (_profile?['stall_lat'] as num?)?.toDouble();
+    final storeLng = (_profile?['stall_lng'] as num?)?.toDouble();
     final deliveryEnabled = _profile?['delivery_enabled'] == true;
     final openTime = _profile?['opening_time']?.toString() ?? '05:00';
     final closeTime = _profile?['closing_time']?.toString() ?? '19:00';
@@ -414,6 +422,8 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
                           closeTime: closeTime,
                           deliveryEnabled: deliveryEnabled,
                           isOwner: isOwner,
+                          storeLat: storeLat,
+                          storeLng: storeLng,
                         ),
                         Padding(
                           padding: MarketplaceUi.pagePadding(
@@ -443,6 +453,8 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
                               closeTime: closeTime,
                               deliveryEnabled: deliveryEnabled,
                               shopOpen: shopOpen,
+                              storeLat: storeLat,
+                              storeLng: storeLng,
                             ),
                           ),
                         ),
@@ -510,6 +522,8 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
     required String closeTime,
     required bool deliveryEnabled,
     required bool isOwner,
+    double? storeLat,
+    double? storeLng,
   }) {
     final screenWidth = MediaQuery.of(context).size.width;
     final compactLayout = screenWidth < 370;
@@ -559,11 +573,13 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
                     runSpacing: 8,
                     children: [
                       _buildHeroBadge(
-                        icon: shopOpen ? Icons.circle : Icons.schedule_rounded,
+                        icon: shopOpen
+                            ? Icons.fiber_manual_record_rounded
+                            : Icons.schedule_rounded,
                         label: shopOpen ? 'Open now' : 'Currently closed',
                         backgroundColor: shopOpen
-                            ? const Color(0x3309B37B)
-                            : const Color(0x33F97316),
+                            ? const Color(0xCC059669)
+                            : const Color(0xCCDC2626),
                       ),
                       _buildHeroBadge(
                         icon: Icons.schedule_rounded,
@@ -603,6 +619,13 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
                             : 'New store',
                         backgroundColor: const Color(0x33F59E0B),
                       ),
+                      if (storeLat != null && storeLng != null)
+                        DistanceBadge(
+                          storeLat: storeLat,
+                          storeLng: storeLng,
+                          foreground: Colors.white,
+                          background: Colors.white.withValues(alpha: 0.18),
+                        ),
                     ],
                   ),
                 ),
@@ -675,9 +698,15 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
                   runSpacing: 8,
                   children: [
                     _buildStoreInfoChip(
-                      icon: Icons.verified_rounded,
-                      label: 'Trusted seller',
-                      color: MarketplaceUi.primary,
+                      icon: shopOpen
+                          ? Icons.check_circle_rounded
+                          : Icons.schedule_rounded,
+                      label: shopOpen
+                          ? 'Open now'
+                          : 'Closed · ${_formatTime(openTime)}',
+                      color: shopOpen
+                          ? MarketplaceUi.success
+                          : MarketplaceUi.warning,
                     ),
                     _buildStoreInfoChip(
                       icon: deliveryEnabled
@@ -690,8 +719,25 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
                           ? MarketplaceUi.accent
                           : MarketplaceUi.primary,
                     ),
+                    if (storeLat != null && storeLng != null)
+                      DistanceBadge(
+                        storeLat: storeLat,
+                        storeLng: storeLng,
+                        foreground: MarketplaceUi.primaryDark,
+                        background:
+                            MarketplaceUi.primary.withValues(alpha: 0.10),
+                      ),
                   ],
                 ),
+                if (address.isNotEmpty || (storeLat != null && storeLng != null)) ...[
+                  const SizedBox(height: 12),
+                  _buildLocationRow(
+                    address: address,
+                    storeLat: storeLat,
+                    storeLng: storeLng,
+                    storeName: storeName,
+                  ),
+                ],
                 const SizedBox(height: 18),
                 _buildHeroActionButtons(
                   isOwner: isOwner,
@@ -864,6 +910,116 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildLocationRow({
+    required String address,
+    required String storeName,
+    double? storeLat,
+    double? storeLng,
+  }) {
+    final hasMap = storeLat != null && storeLng != null;
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: hasMap
+          ? () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => StoreMapFullScreen(
+                    lat: storeLat,
+                    lng: storeLng,
+                    address: address.isEmpty ? null : address,
+                    storeName: storeName,
+                  ),
+                ),
+              )
+          : null,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+        decoration: BoxDecoration(
+          color: MarketplaceUi.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFFDCE3F0)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: MarketplaceUi.primary.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(
+                Icons.place_rounded,
+                color: MarketplaceUi.primary,
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    address.isNotEmpty ? address : 'Pinned on map',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: MarketplaceUi.textStrong,
+                      height: 1.35,
+                    ),
+                  ),
+                  if (hasMap) ...[
+                    const SizedBox(height: 3),
+                    Row(
+                      children: [
+                        const Text(
+                          'View map',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: MarketplaceUi.primary,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(
+                          Icons.arrow_forward_rounded,
+                          color: MarketplaceUi.primary,
+                          size: 13,
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (hasMap)
+              IconButton(
+                tooltip: 'Open in maps',
+                onPressed: () => launchExternalNavigation(
+                  LatLng(storeLat, storeLng),
+                  label: storeName,
+                ),
+                icon: const Icon(
+                  Icons.directions_rounded,
+                  color: MarketplaceUi.primary,
+                ),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: const BorderSide(color: Color(0xFFDCE3F0)),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -1108,6 +1264,8 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
     required String closeTime,
     required bool deliveryEnabled,
     required bool shopOpen,
+    double? storeLat,
+    double? storeLng,
   }) {
     switch (_activeSection) {
       case _StorefrontSection.products:
@@ -1124,6 +1282,8 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
           closeTime: closeTime,
           deliveryEnabled: deliveryEnabled,
           shopOpen: shopOpen,
+          storeLat: storeLat,
+          storeLng: storeLng,
         );
     }
   }
@@ -1204,10 +1364,17 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
                 spacing: 14,
                 runSpacing: 14,
                 children: _products
+                    .asMap()
+                    .entries
                     .map(
-                      (product) => SizedBox(
+                      (entry) => SizedBox(
                         width: itemWidth,
-                        child: _productCard(product),
+                        child: FadeInOnMount(
+                          delay: Duration(
+                            milliseconds: (entry.key * 40).clamp(0, 320),
+                          ),
+                          child: _productCard(entry.value),
+                        ),
                       ),
                     )
                     .toList(),
@@ -1741,6 +1908,8 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
     required String closeTime,
     required bool deliveryEnabled,
     required bool shopOpen,
+    double? storeLat,
+    double? storeLng,
   }) {
     return Column(
       key: const ValueKey('details_section'),
@@ -1845,6 +2014,34 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
                     value: email,
                     allowWrap: true,
                   ),
+              ],
+            ),
+          ),
+        ],
+        if (storeLat != null && storeLng != null) ...[
+          const SizedBox(height: 14),
+          _detailCard(
+            title: 'Find this store',
+            icon: Icons.map_outlined,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                StoreMapPreview(
+                  lat: storeLat,
+                  lng: storeLng,
+                  address: address.isEmpty ? null : address,
+                  storeName: storeName,
+                  height: 170,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Tap the map to view a full-screen pin and the surrounding area.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: MarketplaceUi.textMuted,
+                    height: 1.45,
+                  ),
+                ),
               ],
             ),
           ),

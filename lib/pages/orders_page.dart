@@ -543,6 +543,9 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     final storeLng = (order['store_lng'] as num?)?.toDouble();
     final deliveryLat = (order['delivery_lat'] as num?)?.toDouble();
     final deliveryLng = (order['delivery_lng'] as num?)?.toDouble();
+    final textScale = MediaQuery.textScaleFactorOf(context).clamp(1.0, 1.6);
+    final actionHeight = 40 + ((textScale - 1) * 16);
+    final compactHeight = 36 + ((textScale - 1) * 12);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -772,7 +775,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                     const SizedBox(height: 10),
                     SizedBox(
                       width: double.infinity,
-                      height: 36,
+                      height: compactHeight,
                       child: ElevatedButton.icon(
                         onPressed: () => _repinOrder(order),
                         icon: const Icon(Icons.add_location_alt_rounded, size: 16),
@@ -782,6 +785,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                               fontWeight: FontWeight.w700, fontSize: 12),
                         ),
                         style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                           backgroundColor: const Color(0xFFB45309),
                           foregroundColor: Colors.white,
                           elevation: 0,
@@ -850,7 +854,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                     const SizedBox(height: 10),
                     SizedBox(
                       width: double.infinity,
-                      height: 38,
+                      height: actionHeight,
                       child: ElevatedButton.icon(
                         onPressed: () async {
                           final ok = await launchExternalNavigation(
@@ -872,6 +876,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                               fontWeight: FontWeight.w700, fontSize: 13),
                         ),
                         style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                           backgroundColor: _kPrimary,
                           foregroundColor: Colors.white,
                           elevation: 0,
@@ -894,7 +899,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
               padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
               child: SizedBox(
                 width: double.infinity,
-                height: 40,
+                height: actionHeight,
                 child: ElevatedButton.icon(
                   onPressed: () => _showPickupQR(order),
                   icon: const Icon(Icons.qr_code_rounded, size: 18),
@@ -902,6 +907,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                     style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
                   ),
                   style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                     backgroundColor: const Color(0xFF059669),
                     foregroundColor: Colors.white,
                     elevation: 0,
@@ -918,12 +924,13 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
               padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
               child: SizedBox(
                 width: double.infinity,
-                height: 38,
+                height: actionHeight,
                 child: OutlinedButton.icon(
                   onPressed: () => _cancelOrder(order),
                   icon: const Icon(Icons.cancel_outlined, size: 16),
                   label: const Text('Cancel Order', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
                   style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                     foregroundColor: const Color(0xFFDC2626),
                     side: const BorderSide(color: Color(0xFFDC2626)),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

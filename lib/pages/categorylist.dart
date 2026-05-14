@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/cart_badge_service.dart';
 import '../utils/helpers.dart';
+import '../utils/product_options_sheet.dart';
+import '../utils/page_transitions.dart';
 import 'cart_page.dart';
 import 'productdet.dart';
 
@@ -218,7 +220,30 @@ class _CategoryListPageState extends State<CategoryListPage> {
     return results;
   }
 
-  Future<void> _addToCart(Map<String, dynamic> product) async {
+  Future<void> _onCartIconTapped(Map<String, dynamic> product) async {
+    final result = await showProductOptionsSheet(
+      context: context,
+      product: product,
+      showAddToCart: true,
+      showBuyNow: false,
+    );
+    if (result == null) return;
+    await _addToCart(
+      product,
+      selectedVariant: result.selectedVariant?.name,
+      note: result.note,
+      price: result.effectivePrice,
+      qty: result.qty,
+    );
+  }
+
+  Future<void> _addToCart(
+    Map<String, dynamic> product, {
+    String? selectedVariant,
+    String? note,
+    double? price,
+    double qty = 1.0,
+  }) async {
     final client = Supabase.instance.client;
     final user = client.auth.currentUser;
 
@@ -232,56 +257,65 @@ class _CategoryListPageState extends State<CategoryListPage> {
     final productName = product['product_name'].toString();
     final productId = product['id']?.toString();
     final sellerId = product['seller_id']?.toString();
+    final effectivePrice = price ?? (product['price'] as num?)?.toDouble() ?? 0.0;
 
     try {
+      // Only deduplicate when no variant is selected.
       Map<String, dynamic>? existing;
-      if (productId != null && productId.isNotEmpty) {
-        var query = client
-            .from('cart')
-            .select('id, qty')
-            .eq('buyer_id', user.id)
-            .eq('product_id', productId);
-        if (sellerId != null && sellerId.isNotEmpty) {
-          query = query.eq('seller_id', sellerId);
+      if (selectedVariant == null) {
+        if (productId != null && productId.isNotEmpty) {
+          var query = client
+              .from('cart')
+              .select('id, qty')
+              .eq('buyer_id', user.id)
+              .eq('product_id', productId);
+          if (sellerId != null && sellerId.isNotEmpty) {
+            query = query.eq('seller_id', sellerId);
+          }
+          existing = await query.maybeSingle();
         }
-        existing = await query.maybeSingle();
-      }
-      if (existing == null) {
-        var fallback = client
-            .from('cart')
-            .select('id, qty')
-            .eq('buyer_id', user.id)
-            .eq('product_name', productName);
-        if (sellerId != null && sellerId.isNotEmpty) {
-          fallback = fallback.eq('seller_id', sellerId);
+        if (existing == null) {
+          var fallback = client
+              .from('cart')
+              .select('id, qty')
+              .eq('buyer_id', user.id)
+              .eq('product_name', productName);
+          if (sellerId != null && sellerId.isNotEmpty) {
+            fallback = fallback.eq('seller_id', sellerId);
+          }
+          existing = await fallback.maybeSingle();
         }
-        existing = await fallback.maybeSingle();
       }
 
       if (existing != null) {
-        final qty = int.tryParse(existing['qty'].toString()) ?? 1;
+        final currentQty = double.tryParse(existing['qty'].toString()) ?? 1.0;
         await client
             .from('cart')
-            .update({'qty': qty + 1})
+            .update({'qty': currentQty + qty})
             .eq('id', existing['id'])
             .eq('buyer_id', user.id);
       } else {
         await client.from('cart').insert({
           'product_name': productName,
-          'price': product['price'],
-          'qty': 1,
+          'price': effectivePrice,
+          'qty': qty,
           'buyer_id': user.id,
           'seller_id': sellerId,
           'product_id': productId,
           'image_url': product['image_url'],
           'store_name': product['store_name'],
           'unit_type': product['unit_type'],
+          if (selectedVariant != null && selectedVariant.isNotEmpty)
+            'selected_variant': selectedVariant,
+          if (note != null && note.isNotEmpty) 'buyer_note': note,
         });
       }
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('$productName added to cart')));
+      final variantLabel =
+          selectedVariant != null ? ' ($selectedVariant)' : '';
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$productName$variantLabel added to cart')));
     } on PostgrestException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -561,7 +595,7 @@ class _CategoryListPageState extends State<CategoryListPage> {
                             ),
                           ),
                           InkWell(
-                            onTap: () => _addToCart(p),
+                            onTap: () => _onCartIconTapped(p),
                             borderRadius: BorderRadius.circular(12),
                             child: Container(
                               width: 34,
@@ -988,8 +1022,10 @@ class _CategoryListPageState extends State<CategoryListPage> {
                         mainAxisSpacing: 12,
                         mainAxisExtent: cardHeight,
                       ),
-                      itemBuilder: (context, i) =>
-                          _buildProductCard(products[i], compact: compactCard),
+                      itemBuilder: (context, i) => FadeInOnMount(
+                        delay: Duration(milliseconds: (i * 35).clamp(0, 320)),
+                        child: _buildProductCard(products[i], compact: compactCard),
+                      ),
                     );
                   },
                 ),

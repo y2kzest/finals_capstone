@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(flutter analyze *)",
+      "PowerShell(flutter analyze lib\\\\pages\\\\cart_page.dart lib\\\\pages\\\\payment_method_page.dart lib\\\\pages\\\\paymongo_webview_page.dart lib\\\\services\\\\paymongo_service.dart 2>&1)",
+      "PowerShell(flutter analyze lib\\\\pages\\\\productdet.dart 2>&1)",
+      "PowerShell(supabase secrets set PAYMONGO_SECRET_KEY=sk_test_pnUhMgER7QXwWqLhHvbMXExW 2>&1)"
+    ]
+  }
+}

@@ -162,16 +162,67 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen>
     }).toList();
   }
 
-  Future<void> _updateStock(String productId, int newStock) async {
+  Future<void> _updateStock(
+    String productId,
+    int newStock, {
+    int? previousStock,
+    String? productName,
+  }) async {
     try {
       await supabase
           .from('product')
           .update({'stock_quantity': newStock})
           .eq('id', productId);
+      if (previousStock != null) {
+        await _notifyStockChange(
+          previousStock: previousStock,
+          newStock: newStock,
+          productName: productName ?? 'Item',
+        );
+      }
       _loadProducts();
     } catch (e) {
       debugPrint('Stock update error: $e');
     }
+  }
+
+  Future<void> _notifyStockChange({
+    required int previousStock,
+    required int newStock,
+    required String productName,
+  }) async {
+    final sellerId = supabase.auth.currentUser?.id;
+    if (sellerId == null) return;
+    const int lowThreshold = 5;
+    final crossedToOut = previousStock > 0 && newStock <= 0;
+    final crossedToLow =
+        previousStock >= lowThreshold && newStock < lowThreshold && newStock > 0;
+    final restocked = previousStock <= 0 && newStock > 0;
+    if (!crossedToOut && !crossedToLow && !restocked) return;
+    String title;
+    String body;
+    String type;
+    if (crossedToOut) {
+      title = 'Out of stock';
+      body = '$productName is now out of stock. Restock soon to keep selling.';
+      type = 'out_of_stock';
+    } else if (crossedToLow) {
+      title = 'Low stock';
+      body = '$productName is running low ($newStock left). Consider restocking.';
+      type = 'low_stock';
+    } else {
+      title = 'Restocked';
+      body = '$productName is back in stock ($newStock available).';
+      type = 'restocked';
+    }
+    try {
+      await supabase.from('seller_notifications').insert({
+        'seller_id': sellerId,
+        'title': title,
+        'body': body,
+        'type': type,
+      });
+    } catch (_) {}
   }
 
   Future<void> _deleteProduct(String productId) async {
@@ -320,7 +371,13 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen>
                 int newStock = adjustType == 'add'
                     ? currentStock + qty
                     : (currentStock - qty).clamp(0, 999999);
-                _updateStock(product['id'].toString(), newStock);
+                _updateStock(
+                  product['id'].toString(),
+                  newStock,
+                  previousStock: currentStock,
+                  productName: (product['name'] ?? product['product_name'])
+                      ?.toString(),
+                );
                 Navigator.pop(ctx);
               },
               style: ElevatedButton.styleFrom(
@@ -450,7 +507,13 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen>
                 return;
               }
               final newStock = currentStock - qty;
-              await _updateStock(product['id'].toString(), newStock);
+              await _updateStock(
+                product['id'].toString(),
+                newStock,
+                previousStock: currentStock,
+                productName: (product['name'] ?? product['product_name'])
+                    ?.toString(),
+              );
 
               // Try to log the sale in inventory_log table
               try {
@@ -551,12 +614,23 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen>
                     ((product['price'] is num)
                         ? (product['price'] as num).toInt()
                         : 0);
+                final previousStock = _stockOf(product);
+                final newStock =
+                    int.tryParse(stockController.text) ?? previousStock;
                 await supabase.from('product').update({
                   'name': nameController.text,
                   'price': priceValue,
-                  'stock_quantity':
-                      int.tryParse(stockController.text) ?? _stockOf(product),
+                  'stock_quantity': newStock,
                 }).eq('id', product['id'].toString());
+                await _notifyStockChange(
+                  previousStock: previousStock,
+                  newStock: newStock,
+                  productName: nameController.text.trim().isEmpty
+                      ? ((product['name'] ?? product['product_name'])
+                              ?.toString() ??
+                          'Item')
+                      : nameController.text.trim(),
+                );
                 _loadProducts();
               } catch (e) {
                 debugPrint('Edit product error: $e');

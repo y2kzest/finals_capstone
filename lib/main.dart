@@ -54,6 +54,16 @@ class MyApp extends StatelessWidget {
           ThemeData(brightness: Brightness.light).textTheme,
         ),
         scaffoldBackgroundColor: MarketplaceUi.surface,
+        pageTransitionsTheme: const PageTransitionsTheme(
+          builders: {
+            TargetPlatform.android: _FadeSlidePageTransitionsBuilder(),
+            TargetPlatform.iOS: _FadeSlidePageTransitionsBuilder(),
+            TargetPlatform.windows: _FadeSlidePageTransitionsBuilder(),
+            TargetPlatform.macOS: _FadeSlidePageTransitionsBuilder(),
+            TargetPlatform.linux: _FadeSlidePageTransitionsBuilder(),
+            TargetPlatform.fuchsia: _FadeSlidePageTransitionsBuilder(),
+          },
+        ),
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.white,
           foregroundColor: MarketplaceUi.textStrong,
@@ -137,6 +147,35 @@ class MyApp extends StatelessWidget {
       ),
       home: const LoginPage(),
       routes: {'/home': (context) => const Bahay()},
+    );
+  }
+}
+
+class _FadeSlidePageTransitionsBuilder extends PageTransitionsBuilder {
+  const _FadeSlidePageTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    final curved = CurvedAnimation(
+      parent: animation,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+    return FadeTransition(
+      opacity: curved,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0.06, 0),
+          end: Offset.zero,
+        ).animate(curved),
+        child: child,
+      ),
     );
   }
 }

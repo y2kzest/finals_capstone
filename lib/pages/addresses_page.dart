@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../services/buyer_location_service.dart';
 import 'pick_location_page.dart';
 
 const Color _kPrimary = Color(0xFF2A4BA0);
@@ -96,6 +97,7 @@ class _AddressesPageState extends State<AddressesPage> {
           .update({'delivery_address': chosen['address']})
           .eq('user_id', user.id);
     }
+    BuyerLocationService.instance.invalidate();
     await _load();
   }
 
@@ -132,6 +134,7 @@ class _AddressesPageState extends State<AddressesPage> {
     );
     if (confirm != true) return;
     await _supabase.from('delivery_addresses').delete().eq('id', id);
+    BuyerLocationService.instance.invalidate();
     await _load();
   }
 
@@ -184,6 +187,7 @@ class _AddressesPageState extends State<AddressesPage> {
               .eq('user_id', user.id);
         }
       }
+      BuyerLocationService.instance.invalidate();
       await _load();
     } on PostgrestException catch (e) {
       if (mounted) {

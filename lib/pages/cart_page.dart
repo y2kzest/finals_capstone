@@ -4,10 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/cart_badge_service.dart';
+import '../services/paymongo_service.dart';
 import '../services/pickup_preference_service.dart';
 import '../utils/delivery_route_preview.dart';
+import '../utils/page_transitions.dart';
 import 'orders_page.dart';
 import 'addresses_page.dart';
+import 'payment_method_page.dart';
+import 'paymongo_webview_page.dart';
 import 'pick_location_page.dart';
 
 class CartPage extends StatefulWidget {
@@ -31,6 +35,36 @@ class _CartPageState extends State<CartPage> {
   static const Color _kPrimary = Color(0xFF2A4BA0);
   static const Color _kSurface = Color(0xFFF5F6FB);
   static const Color _kRed = Color(0xFFDC2626);
+
+  TimeOfDay _parseCartPickupTime(String? time) {
+    if (time == null || time.trim().isEmpty) return TimeOfDay.now();
+    final normalized = time.trim().toLowerCase();
+    if (normalized.contains('morning')) return const TimeOfDay(hour: 9, minute: 0);
+    if (normalized.contains('afternoon')) return const TimeOfDay(hour: 14, minute: 0);
+    if (normalized.contains('evening')) return const TimeOfDay(hour: 18, minute: 0);
+    if (normalized.contains('all day') || normalized.contains('tomorrow')) {
+      return const TimeOfDay(hour: 10, minute: 0);
+    }
+    try {
+      final parts = time.split(' ');
+      final hm = parts[0].split(':');
+      int hour = int.parse(hm[0]);
+      final minute = int.parse(hm[1]);
+      final isPm = parts.length > 1 && parts[1].toUpperCase() == 'PM';
+      if (isPm && hour != 12) hour += 12;
+      if (!isPm && hour == 12) hour = 0;
+      return TimeOfDay(hour: hour, minute: minute);
+    } catch (_) {
+      return TimeOfDay.now();
+    }
+  }
+
+  String _formatCartPickupTime(TimeOfDay t) {
+    final hour = t.hourOfPeriod == 0 ? 12 : t.hourOfPeriod;
+    final minute = t.minute.toString().padLeft(2, '0');
+    final period = t.period == DayPeriod.am ? 'AM' : 'PM';
+    return '$hour:$minute $period';
+  }
 
   static String _generatePickupCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -215,7 +249,7 @@ class _CartPageState extends State<CartPage> {
     }
   }
 
-  Future<void> _updateQty(Map<String, dynamic> item, int newQty) async {
+  Future<void> _updateQty(Map<String, dynamic> item, double newQty) async {
     final user = supabase.auth.currentUser;
     if (user == null) return;
     final id = item['id']?.toString();
@@ -271,6 +305,21 @@ class _CartPageState extends State<CartPage> {
     } catch (_) {}
   }
 
+  bool _isSellerCurrentlyOpen(Map<String, dynamic> info) {
+    if (info['is_open'] != true) return false;
+    try {
+      final now = TimeOfDay.now();
+      final op = (info['opening_time'] as String).split(':');
+      final cl = (info['closing_time'] as String).split(':');
+      final openMin = int.parse(op[0]) * 60 + int.parse(op[1]);
+      final closeMin = int.parse(cl[0]) * 60 + int.parse(cl[1]);
+      final nowMin = now.hour * 60 + now.minute;
+      return nowMin >= openMin && nowMin <= closeMin;
+    } catch (_) {
+      return info['is_open'] == true;
+    }
+  }
+
   Future<void> _checkout() async {
     final user = supabase.auth.currentUser;
     if (user == null || _cartItems.isEmpty) return;
@@ -288,7 +337,7 @@ class _CartPageState extends State<CartPage> {
           final profiles = await supabase
               .from('seller_profiles')
               .select(
-                  'user_id, store_name, store_address, delivery_enabled, stall_lat, stall_lng')
+                  'user_id, store_name, store_address, delivery_enabled, stall_lat, stall_lng, is_open, opening_time, closing_time')
               .inFilter('user_id', sellerIds);
           for (final p in profiles as List) {
             sellerInfo[p['user_id'].toString()] = {
@@ -297,9 +346,35 @@ class _CartPageState extends State<CartPage> {
               'delivery_enabled': p['delivery_enabled'] == true,
               'stall_lat': (p['stall_lat'] as num?)?.toDouble(),
               'stall_lng': (p['stall_lng'] as num?)?.toDouble(),
+              'is_open': p['is_open'] == true,
+              'opening_time': p['opening_time']?.toString() ?? '05:00',
+              'closing_time': p['closing_time']?.toString() ?? '19:00',
             };
           }
         } catch (_) {}
+      }
+
+      // Block checkout if any store is currently closed
+      final closedStoreNames = <String>[];
+      for (final sellerId in sellerIds) {
+        final info = sellerInfo[sellerId];
+        if (info != null && !_isSellerCurrentlyOpen(info)) {
+          closedStoreNames.add(info['store_name'] as String? ?? 'A store');
+        }
+      }
+      if (closedStoreNames.isNotEmpty) {
+        setState(() => _isCheckingOut = false);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${closedStoreNames.join(', ')} ${closedStoreNames.length == 1 ? 'is' : 'are'} currently closed. You can\'t place orders from closed stores.',
+            ),
+            backgroundColor: const Color(0xFFDC2626),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
       }
 
       // Determine which seller IDs have delivery enabled
@@ -311,7 +386,7 @@ class _CartPageState extends State<CartPage> {
           .instance
           .currentValue
           .trim();
-      final pickupTimeForOrders = preferredPickupWindow.isEmpty
+      String? pickupTimeForOrders = preferredPickupWindow.isEmpty
           ? null
           : preferredPickupWindow;
 
@@ -351,6 +426,13 @@ class _CartPageState extends State<CartPage> {
         deliveryAddress = result['delivery_address'] as String?;
         deliveryLat = (result['delivery_lat'] as num?)?.toDouble();
         deliveryLng = (result['delivery_lng'] as num?)?.toDouble();
+        final sheetPickupTime =
+            (result['pickup_time'] as String?)?.trim();
+        if (sheetPickupTime != null && sheetPickupTime.isNotEmpty) {
+          pickupTimeForOrders = sheetPickupTime;
+          // Persist so the home WITHIN pill reflects the buyer's latest choice.
+          await PickupPreferenceService.instance.save(sheetPickupTime);
+        }
         // Only save to profile if user typed a new custom address (not picked a saved tile)
         final isCustom = result['is_custom'] as bool? ?? false;
         final typedAddress = result['delivery_address'] as String?;
@@ -370,6 +452,33 @@ class _CartPageState extends State<CartPage> {
             : 'pickup';
         return itemOrderType == 'pickup';
       });
+
+      // Ask the buyer how they want to pay (GCash / Maya / COD)
+      final cartTotal = _cartItems.fold<double>(
+        0,
+        (sum, i) => sum + _price(i['price']) * _qty(i['qty']),
+      );
+      setState(() => _isCheckingOut = false);
+      if (!mounted) return;
+      final paymentChoice = await Navigator.of(context).push<PaymentMethodChoice>(
+        MaterialPageRoute(
+          builder: (_) => PaymentMethodPage(
+            totalAmount: cartTotal,
+            itemCount: _totalItems,
+            shopCount: sellerIds.length,
+          ),
+        ),
+      );
+      if (paymentChoice == null) return; // buyer backed out
+      if (!mounted) return;
+      setState(() => _isCheckingOut = true);
+
+      final isOnline = paymentChoice.isOnline;
+      final walletMethod = paymentChoice.wallet;
+      final paymentMethodCode = walletMethod?.apiValue ?? 'cod';
+      final initialPaymentStatus = isOnline ? 'pending' : 'paid';
+
+      final List<String> insertedOrderIds = [];
 
       for (final item in _cartItems) {
         final price = _price(item['price']);
@@ -407,6 +516,10 @@ class _CartPageState extends State<CartPage> {
           'status': 'pending',
           'pickup_code': pickupCode,
           'order_type': itemOrderType,
+          'payment_method': paymentMethodCode,
+          'payment_status': initialPaymentStatus,
+          if ((item['selected_variant'] as String?)?.isNotEmpty == true)
+            'selected_variant': item['selected_variant'],
           if (itemDeliveryAddress != null && itemDeliveryAddress.isNotEmpty)
             'delivery_address': itemDeliveryAddress,
           if (itemDeliveryLat != null) 'delivery_lat': itemDeliveryLat,
@@ -428,8 +541,11 @@ class _CartPageState extends State<CartPage> {
             .insert(orderData)
             .select('id')
             .single();
+        insertedOrderIds.add(orderRes['id'].toString());
 
-        if (sellerId != null && sellerId.isNotEmpty) {
+        // For online payments we hold off on notifying the seller until the
+        // PayMongo webhook confirms the payment — see paymongo-webhook fn.
+        if (!isOnline && sellerId != null && sellerId.isNotEmpty) {
           await supabase.from('seller_notifications').insert({
             'seller_id': sellerId,
             'order_id': orderRes['id'],
@@ -444,30 +560,139 @@ class _CartPageState extends State<CartPage> {
         // Buyer notification
         await supabase.from('notifications').insert({
           'user_id': user.id,
-          'type': 'order_placed',
-          'title': 'Order Placed',
-          'message':
-              '${item['product_name'] ?? 'Item'} x$qty — P${(price * qty).toStringAsFixed(0)} order sent to ${item['store_name'] ?? 'seller'}',
+          'type': isOnline ? 'order_pending_payment' : 'order_placed',
+          'title': isOnline ? 'Awaiting Payment' : 'Order Placed',
+          'message': isOnline
+              ? '${item['product_name'] ?? 'Item'} x$qty — waiting for your '
+                  '${walletMethod?.label ?? 'online'} payment'
+              : '${item['product_name'] ?? 'Item'} x$qty — P${(price * qty).toStringAsFixed(0)} order sent to ${item['store_name'] ?? 'seller'}',
           'is_read': false,
         });
       }
-      await _clearCart();
+
+      // COD path: clear cart immediately and celebrate
+      if (!isOnline) {
+        await _clearCart();
+        if (!mounted) return;
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => _CheckoutSuccessDialog(
+            pickupTime: hasPickupOrders ? pickupTimeForOrders : null,
+            onViewOrders: () {
+              Navigator.of(ctx).pop();
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const OrdersPage()),
+              );
+            },
+            onContinue: () => Navigator.of(ctx).pop(),
+          ),
+        );
+        return;
+      }
+
+      // Online payment path: create PayMongo source, open WebView, poll status
+      final amountCentavos = (cartTotal * 100).round();
+      final buyerEmail = user.email ?? '';
+      final buyerName =
+          (user.userMetadata?['full_name'] as String?)?.trim() ?? '';
+
+      final PaymongoCheckout checkout;
+      try {
+        checkout = await PaymongoService.instance.createWalletCheckout(
+          orderIds: insertedOrderIds,
+          method: walletMethod!,
+          amountCentavos: amountCentavos,
+          email: buyerEmail,
+          name: buyerName,
+        );
+      } on PaymongoException catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not start payment: ${e.message}'),
+            backgroundColor: _kRed,
+          ),
+        );
+        return;
+      }
+
       if (!mounted) return;
-      await showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => _CheckoutSuccessDialog(
-          pickupTime: hasPickupOrders ? pickupTimeForOrders : null,
-          onViewOrders: () {
-            Navigator.of(ctx).pop();
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const OrdersPage()),
-            );
-          },
-          onContinue: () => Navigator.of(ctx).pop(),
+      final webResult = await Navigator.of(context).push<PaymongoWebResult>(
+        MaterialPageRoute(
+          builder: (_) => PaymongoWebViewPage(
+            checkoutUrl: checkout.checkoutUrl,
+            methodLabel: walletMethod.label,
+            pollOrderId: insertedOrderIds.first,
+          ),
         ),
       );
+      if (!mounted) return;
+
+      if (webResult == PaymongoWebResult.success) {
+        // PayMongo redirected to our success_url. Confirm via webhook-updated
+        // order row (the webhook flips payment_status to 'paid').
+        setState(() => _isCheckingOut = true);
+        final finalStatus = await PaymongoService.instance
+            .waitForPaymentResult(insertedOrderIds.first);
+        if (!mounted) return;
+
+        if (finalStatus == 'paid') {
+          await _clearCart();
+          if (!mounted) return;
+          await showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (ctx) => _CheckoutSuccessDialog(
+              pickupTime: hasPickupOrders ? pickupTimeForOrders : null,
+              onViewOrders: () {
+                Navigator.of(ctx).pop();
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const OrdersPage()),
+                );
+              },
+              onContinue: () => Navigator.of(ctx).pop(),
+            ),
+          );
+        } else {
+          // Webhook hasn't flipped it yet — clear the cart anyway since orders
+          // exist; the buyer can refresh Orders in a moment.
+          await _clearCart();
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Payment received. Confirming with the bank — check Orders in a moment.',
+              ),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      } else if (webResult == PaymongoWebResult.failed) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Payment was declined. Your orders are saved — try again from Orders.',
+            ),
+            backgroundColor: _kRed,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } else {
+        // cancelled / dismissed
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Payment cancelled. Your orders are saved — you can pay later from Orders.',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -502,6 +727,7 @@ class _CartPageState extends State<CartPage> {
 
     String selected = 'pickup';
     String? selectedAddrId = defaultAddr?['id']?.toString();
+    String? chosenPickupTime = pickupPreference;
     final addrCtrl = TextEditingController(
       text: defaultAddr == null ? _savedAddress : '',
     );
@@ -555,9 +781,28 @@ class _CartPageState extends State<CartPage> {
                     'How would you like to receive your orders?',
                     style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
                   ),
-                  if (pickupPreference != null && pickupPreference.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 12),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: () async {
+                        final initial = _parseCartPickupTime(chosenPickupTime);
+                        final picked = await showTimePicker(
+                          context: ctx,
+                          initialTime: initial,
+                          helpText: 'Pickup time for pickup orders',
+                          builder: (c, child) => MediaQuery(
+                            data: MediaQuery.of(c).copyWith(
+                              alwaysUse24HourFormat: false,
+                            ),
+                            child: child!,
+                          ),
+                        );
+                        if (picked == null) return;
+                        setModal(() {
+                          chosenPickupTime = _formatCartPickupTime(picked);
+                        });
+                      },
                       child: Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(12),
@@ -576,7 +821,10 @@ class _CartPageState extends State<CartPage> {
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                'Pickup time for pickup orders: $pickupPreference',
+                                chosenPickupTime == null ||
+                                        chosenPickupTime!.isEmpty
+                                    ? 'Tap to set pickup time'
+                                    : 'Pickup time: $chosenPickupTime',
                                 style: const TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
@@ -584,10 +832,16 @@ class _CartPageState extends State<CartPage> {
                                 ),
                               ),
                             ),
+                            const Icon(
+                              Icons.edit_outlined,
+                              color: _kPrimary,
+                              size: 16,
+                            ),
                           ],
                         ),
                       ),
                     ),
+                  ),
                   const SizedBox(height: 16),
                   _CartDeliveryTile(
                     icon: Icons.storefront_rounded,
@@ -984,11 +1238,13 @@ class _CartPageState extends State<CartPage> {
                             'delivery_lat': finalLat,
                             'delivery_lng': finalLng,
                             'is_custom': showCustomField,
+                            'pickup_time': chosenPickupTime,
                           });
                         } else {
                           Navigator.pop(ctx, {
                             'order_type': 'pickup',
                             'delivery_address': null,
+                            'pickup_time': chosenPickupTime,
                           });
                         }
                       },
@@ -1025,9 +1281,9 @@ class _CartPageState extends State<CartPage> {
     return double.tryParse(v?.toString() ?? '') ?? 0;
   }
 
-  int _qty(dynamic v) {
-    if (v is int) return v;
-    return int.tryParse(v?.toString() ?? '') ?? 1;
+  double _qty(dynamic v) {
+    if (v is num) return v.toDouble();
+    return double.tryParse(v?.toString() ?? '') ?? 1.0;
   }
 
   String _name(Map<String, dynamic> item) {
@@ -1059,11 +1315,7 @@ class _CartPageState extends State<CartPage> {
     return t;
   }
 
-  int get _totalItems {
-    int t = 0;
-    for (final i in _cartItems) t += _qty(i['qty']);
-    return t;
-  }
+  int get _totalItems => _cartItems.length;
 
   @override
   Widget build(BuildContext context) {
@@ -1683,7 +1935,7 @@ class _CartPageState extends State<CartPage> {
 
   Widget _buildShopGroup(String shopName, List<Map<String, dynamic>> items) {
     double shopTotal = 0;
-    final itemCount = items.fold<int>(0, (sum, i) => sum + _qty(i['qty']));
+    final itemCount = items.length;
     for (final i in items) shopTotal += _price(i['price']) * _qty(i['qty']);
     final sellerId = items.first['seller_id']?.toString();
     final logoUrl = sellerId != null ? _sellerLogos[sellerId] : null;
@@ -1809,7 +2061,12 @@ class _CartPageState extends State<CartPage> {
             ),
           ),
           const Divider(height: 1, color: Color(0xFFF3F4F6)),
-          ...items.map((item) => _buildCartItemTile(item)),
+          ...items.asMap().entries.map(
+                (e) => FadeInOnMount(
+                  delay: Duration(milliseconds: (e.key * 35).clamp(0, 240)),
+                  child: _buildCartItemTile(e.value),
+                ),
+              ),
           const SizedBox(height: 4),
         ],
       ),
@@ -1822,6 +2079,12 @@ class _CartPageState extends State<CartPage> {
     final unit = (item['unit_type'] ?? 'kg').toString();
     final imgUrl = _image(item);
     final subtotal = price * qty;
+    final isWeight = ['kg', 'g', 'gram', 'grams', 'lb', 'lbs', 'kilogram', 'kilograms']
+        .contains(unit.toLowerCase());
+    final step = isWeight ? 0.5 : 1.0;
+    final minQty = isWeight ? 0.5 : 1.0;
+    String fmtQty(double v) =>
+        v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
 
     return Dismissible(
       key: ValueKey(item['id']),
@@ -1916,6 +2179,24 @@ class _CartPageState extends State<CartPage> {
                       fontWeight: FontWeight.w500,
                     ),
                   ),
+                  if ((item['selected_variant'] as String?)?.isNotEmpty == true) ...[
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEEF2FF),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        item['selected_variant'] as String,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF2A4BA0),
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Row(
                     children: [
@@ -1930,12 +2211,12 @@ class _CartPageState extends State<CartPage> {
                           children: [
                             _qtyButton(
                               Icons.remove,
-                              () => _updateQty(item, qty - 1),
+                              () => _updateQty(item, (qty - step).clamp(minQty, double.infinity)),
                             ),
                             SizedBox(
-                              width: 28,
+                              width: 36,
                               child: Text(
-                                '$qty',
+                                fmtQty(qty),
                                 textAlign: TextAlign.center,
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w800,
@@ -1946,7 +2227,7 @@ class _CartPageState extends State<CartPage> {
                             ),
                             _qtyButton(
                               Icons.add,
-                              () => _updateQty(item, qty + 1),
+                              () => _updateQty(item, qty + step),
                             ),
                           ],
                         ),

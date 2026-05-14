@@ -28,6 +28,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
   RealtimeChannel? _notifChannel;
   int _unreadCount = 0;
   bool _autoAccept = false;
+  final Map<String, Future<List<Map<String, dynamic>>>> _orderFutures = {};
 
   @override
   void initState() {
@@ -95,7 +96,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
           filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'seller_id', value: userId),
           callback: (payload) {
             if (!mounted) return;
-            setState(() {});
+            setState(() => _orderFutures.clear());
             if (_autoAccept) {
               final newRecord = payload.newRecord;
               final orderId = newRecord['id']?.toString();
@@ -110,14 +111,14 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
           schema: 'public',
           table: 'orders',
           filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'seller_id', value: userId),
-          callback: (_) { if (mounted) setState(() {}); },
+          callback: (_) { if (mounted) setState(() => _orderFutures.clear()); },
         )
         .onPostgresChanges(
           event: PostgresChangeEvent.delete,
           schema: 'public',
           table: 'orders',
           filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'seller_id', value: userId),
-          callback: (_) { if (mounted) setState(() {}); },
+          callback: (_) { if (mounted) setState(() => _orderFutures.clear()); },
         )
         .subscribe();
 
@@ -172,6 +173,34 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     super.dispose();
   }
 
+  /// Inserts a seller_notifications row when stock crosses the low-stock or
+  /// out-of-stock threshold. Threshold is the same one used in the inventory
+  /// summary (<5 = low, ≤0 = out).
+  Future<void> _maybeNotifyLowStock({
+    required String? sellerId,
+    required String productName,
+    required int previousStock,
+    required int newStock,
+    String? orderId,
+  }) async {
+    if (sellerId == null || sellerId.isEmpty) return;
+    const int lowThreshold = 5;
+    final crossedToOut = previousStock > 0 && newStock <= 0;
+    final crossedToLow = previousStock >= lowThreshold && newStock < lowThreshold && newStock > 0;
+    if (!crossedToOut && !crossedToLow) return;
+    try {
+      await supabase.from('seller_notifications').insert({
+        'seller_id': sellerId,
+        if (orderId != null) 'order_id': orderId,
+        'title': crossedToOut ? 'Out of stock' : 'Low stock',
+        'body': crossedToOut
+            ? '$productName is now out of stock. Restock soon to keep selling.'
+            : '$productName is running low ($newStock left). Consider restocking.',
+        'type': crossedToOut ? 'out_of_stock' : 'low_stock',
+      });
+    } catch (_) {}
+  }
+
   Future<List<Map<String, dynamic>>> _fetchOrders(String status) async {
     final userId = supabase.auth.currentUser?.id;
     if (userId == null) return [];
@@ -205,7 +234,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
           try {
             final prod = await supabase
                 .from('product')
-                .select('stock_quantity')
+                .select('stock_quantity, product_name')
                 .eq('id', productId)
                 .maybeSingle();
             final currentStock = (prod?['stock_quantity'] as num?)?.toInt() ?? 0;
@@ -214,6 +243,17 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                 .from('product')
                 .update({'stock_quantity': newStock})
                 .eq('id', productId);
+
+            // Low-stock / out-of-stock notification to the seller.
+            await _maybeNotifyLowStock(
+              sellerId: order['seller_id']?.toString(),
+              productName: (prod?['product_name'] ?? order['product_name'])
+                      ?.toString() ??
+                  'Item',
+              previousStock: currentStock,
+              newStock: newStock,
+              orderId: orderId,
+            );
           } catch (_) {}
         }
       }
@@ -708,8 +748,9 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
   }
 
   Widget _buildTab(String status) {
+    _orderFutures[status] ??= _fetchOrders(status);
     return FutureBuilder<List<Map<String, dynamic>>>(
-      future: _fetchOrders(status),
+      future: _orderFutures[status],
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
           return const Center(child: CircularProgressIndicator(color: _kPrimary, strokeWidth: 2.5));
@@ -719,7 +760,9 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
 
         return RefreshIndicator(
           color: _kPrimary,
-          onRefresh: () async { setState(() {}); },
+          onRefresh: () async {
+            setState(() => _orderFutures[status] = _fetchOrders(status));
+          },
           child: ListView.builder(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
             itemCount: orders.length,
@@ -752,6 +795,8 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     final deliveryLng = (o['delivery_lng'] as num?)?.toDouble();
     final storeLat = (o['store_lat'] as num?)?.toDouble();
     final storeLng = (o['store_lng'] as num?)?.toDouble();
+    final textScale = MediaQuery.textScaleFactorOf(context).clamp(1.0, 1.6);
+    final actionHeight = 48 + ((textScale - 1) * 16);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -906,7 +951,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                       const SizedBox(height: 10),
                       SizedBox(
                         width: double.infinity,
-                        height: 38,
+                        height: actionHeight,
                         child: ElevatedButton.icon(
                           onPressed: () async {
                             final ok = await launchExternalNavigation(
@@ -928,6 +973,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                                 fontWeight: FontWeight.w700, fontSize: 13),
                           ),
                           style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                             backgroundColor: const Color(0xFF0891B2),
                             foregroundColor: Colors.white,
                             elevation: 0,
@@ -1042,10 +1088,11 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                 children: [
                   Expanded(
                     child: SizedBox(
-                      height: 40,
+                      height: actionHeight,
                       child: OutlinedButton(
                         onPressed: () => _declineOrder(orderId),
                         style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                           foregroundColor: _kRed,
                           side: const BorderSide(color: _kRed),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1058,10 +1105,11 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                   Expanded(
                     flex: 2,
                     child: SizedBox(
-                      height: 40,
+                      height: actionHeight,
                       child: ElevatedButton(
                         onPressed: () => _updateStatus(orderId, 'preparing', o),
                         style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                           backgroundColor: _kGreen,
                           foregroundColor: Colors.white,
                           elevation: 0,
@@ -1079,10 +1127,11 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
               child: SizedBox(
-                width: double.infinity, height: 40,
+                width: double.infinity, height: actionHeight,
                 child: ElevatedButton(
                   onPressed: () => _updateStatus(orderId, 'ready', o),
                   style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                     backgroundColor: _kPrimary,
                     foregroundColor: Colors.white,
                     elevation: 0,
@@ -1102,7 +1151,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
               child: isDelivery
                   ? SizedBox(
                       width: double.infinity,
-                      height: 40,
+                      height: actionHeight,
                       child: ElevatedButton.icon(
                         onPressed: () => _updateStatus(orderId, 'completed', o),
                         icon: const Icon(Icons.check_circle_rounded, size: 18),
@@ -1111,6 +1160,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                           style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
                         ),
                         style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                           backgroundColor: _kGreen,
                           foregroundColor: Colors.white,
                           elevation: 0,
@@ -1124,7 +1174,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                       children: [
                         Expanded(
                           child: SizedBox(
-                            height: 40,
+                            height: actionHeight,
                             child: ElevatedButton.icon(
                               onPressed: () =>
                                   _showVerifyPickupDialog(orderId, o),
@@ -1140,6 +1190,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                                 ),
                               ),
                               style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                                 backgroundColor: _kPurple,
                                 foregroundColor: Colors.white,
                                 elevation: 0,
@@ -1227,12 +1278,12 @@ class _QRScannerPageState extends State<_QRScannerPage> {
           MobileScanner(
             controller: _controller,
             onDetect: (capture) {
-              if (_hasScanned) return;
+              if (_hasScanned || !mounted) return;
               final barcodes = capture.barcodes;
               if (barcodes.isEmpty) return;
               final code = barcodes.first.rawValue;
               if (code == null || code.isEmpty) return;
-              _hasScanned = true;
+              setState(() => _hasScanned = true);
               Navigator.pop(context, code);
             },
           ),
