@@ -49,7 +49,10 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
       setState(() => _isLoading = true);
     }
     try {
-      await Future.wait([_loadProfile(), _loadProducts()]);
+      // Load profile first so the products fetch can short-circuit if the
+      // seller has been suspended.
+      await _loadProfile();
+      await _loadProducts();
       await _loadReviews();
     } finally {
       if (mounted) {
@@ -66,7 +69,7 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
             'store_name, store_information_final, logo_url, cover_url, '
             'description, is_open, opening_time, closing_time, '
             'store_address, delivery_enabled, official_contact_email, '
-            'stall_lat, stall_lng',
+            'stall_lat, stall_lng, approval_status',
           )
           .eq('user_id', widget.sellerId)
           .maybeSingle();
@@ -76,7 +79,20 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
     } catch (_) {}
   }
 
+  bool get _isSellerSuspended {
+    final status = _profile?['approval_status']?.toString().toLowerCase();
+    return status == 'suspended' || status == 'rejected';
+  }
+
   Future<void> _loadProducts() async {
+    // Skip the product fetch entirely for suspended/rejected stores so we
+    // can't accidentally render their listings.
+    if (_isSellerSuspended) {
+      if (mounted) {
+        setState(() => _products = []);
+      }
+      return;
+    }
     try {
       final data = await _supabase
           .from('product')
@@ -472,28 +488,18 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
       padding: MarketplaceUi.pagePadding(context, top: 22, bottom: 30),
       child: Column(
         children: [
-          Container(
-            height: 260,
-            decoration: BoxDecoration(
-              color: const Color(0xFFDCE6F6),
-              borderRadius: BorderRadius.circular(32),
-            ),
-          ),
+          ShimmerBox(height: 260, borderRadius: BorderRadius.circular(32)),
           const SizedBox(height: 18),
-          Container(
-            height: 250,
-            decoration: MarketplaceUi.panel(color: const Color(0xFFF2F5FA)),
-          ),
+          ShimmerBox(height: 250, borderRadius: BorderRadius.circular(22)),
           const SizedBox(height: 18),
           Row(
             children: List.generate(
               3,
               (index) => Expanded(
-                child: Container(
-                  height: 54,
-                  margin: EdgeInsets.only(right: index == 2 ? 0 : 10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF2F5FA),
+                child: Padding(
+                  padding: EdgeInsets.only(right: index == 2 ? 0 : 10),
+                  child: ShimmerBox(
+                    height: 54,
                     borderRadius: BorderRadius.circular(18),
                   ),
                 ),
@@ -501,10 +507,7 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
             ),
           ),
           const SizedBox(height: 18),
-          Container(
-            height: 320,
-            decoration: MarketplaceUi.panel(color: const Color(0xFFF2F5FA)),
-          ),
+          ShimmerBox(height: 320, borderRadius: BorderRadius.circular(22)),
         ],
       ),
     );
@@ -1289,6 +1292,41 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
   }
 
   Widget _buildProductsSection(BuildContext context) {
+    if (_isSellerSuspended) {
+      return Container(
+        key: const ValueKey('products_suspended'),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+        decoration: MarketplaceUi.panel(),
+        child: const Column(
+          children: [
+            Icon(
+              Icons.block_rounded,
+              size: 44,
+              color: MarketplaceUi.danger,
+            ),
+            SizedBox(height: 12),
+            Text(
+              'Store unavailable',
+              style: TextStyle(
+                fontSize: 19,
+                fontWeight: FontWeight.w900,
+                color: MarketplaceUi.textStrong,
+              ),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'This seller has been suspended by an administrator. Their products are not available right now.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.5,
+                color: MarketplaceUi.textMuted,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     if (_products.isEmpty) {
       return Container(
         key: const ValueKey('products_empty'),

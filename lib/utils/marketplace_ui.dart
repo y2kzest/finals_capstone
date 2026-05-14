@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class MarketplaceUi {
@@ -32,6 +33,34 @@ class MarketplaceUi {
     final width = MediaQuery.sizeOf(context).width;
     final horizontal = width < 360 ? 14.0 : width < 420 ? 16.0 : 20.0;
     return EdgeInsets.fromLTRB(horizontal, top, horizontal, bottom);
+  }
+
+  /// Returns a sensible cross-axis count for a product grid based on the
+  /// available width. Keeps cards from getting unreadably narrow on large
+  /// phones / tablets / desktop browsers.
+  static int gridCrossAxisCount(double maxWidth, {double targetCardWidth = 190}) {
+    if (maxWidth <= 0) return 2;
+    final count = (maxWidth / targetCardWidth).floor();
+    if (count < 2) return 2;
+    if (count > 5) return 5;
+    return count;
+  }
+
+  /// Helper that picks one of several values based on screen width.
+  /// Lets callers fluently scale type/spacing without re-writing the same
+  /// breakpoint ladder in every widget.
+  static T responsiveValue<T>(
+    BuildContext context, {
+    required T base,
+    T? small,
+    T? medium,
+    T? large,
+  }) {
+    final width = MediaQuery.sizeOf(context).width;
+    if (width < 360 && small != null) return small;
+    if (width >= 600 && large != null) return large;
+    if (width >= 420 && medium != null) return medium;
+    return base;
   }
 
   static BoxDecoration panel({
@@ -95,35 +124,78 @@ class MarketplaceUi {
 Route<T> buildMarketplaceRoute<T>(Widget page) {
   return PageRouteBuilder<T>(
     pageBuilder: (_, animation, secondaryAnimation) => page,
-    transitionDuration: const Duration(milliseconds: 280),
-    reverseTransitionDuration: const Duration(milliseconds: 220),
+    transitionDuration: const Duration(milliseconds: 320),
+    reverseTransitionDuration: const Duration(milliseconds: 240),
     transitionsBuilder: (context, animation, secondaryAnimation, child) {
-      final fade = CurvedAnimation(
+      final curved = CurvedAnimation(
         parent: animation,
         curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
+      );
+      final secondaryCurved = CurvedAnimation(
+        parent: secondaryAnimation,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
       );
       final slide = Tween<Offset>(
-        begin: const Offset(0, 0.04),
+        begin: const Offset(0, 0.05),
         end: Offset.zero,
-      ).animate(fade);
+      ).animate(curved);
+      // The outgoing screen drifts upward slightly and fades a touch, which
+      // gives the layered marketplace feel rather than a flat replace.
+      final outgoingSlide = Tween<Offset>(
+        begin: Offset.zero,
+        end: const Offset(0, -0.025),
+      ).animate(secondaryCurved);
+      final outgoingFade = Tween<double>(begin: 1, end: 0.92).animate(
+        secondaryCurved,
+      );
       return FadeTransition(
-        opacity: fade,
-        child: SlideTransition(position: slide, child: child),
+        opacity: curved,
+        child: SlideTransition(
+          position: slide,
+          child: SlideTransition(
+            position: outgoingSlide,
+            child: FadeTransition(opacity: outgoingFade, child: child),
+          ),
+        ),
       );
     },
   );
 }
 
+/// Tap feedback configuration applied to the pressable card primitives.
+class PressableTapStyle {
+  const PressableTapStyle({
+    this.haptic = true,
+    this.scale = 0.985,
+    this.hoverScale = 1.01,
+    this.lift = 4.0,
+  });
+
+  /// Triggers a light selection click on tap-down — small, polished feedback
+  /// that gives the marketplace a more "production-ready" tactile feel
+  /// without being noisy.
+  final bool haptic;
+  final double scale;
+  final double hoverScale;
+  final double lift;
+}
+
 class PressableCard extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final BorderRadius borderRadius;
+  final PressableTapStyle style;
 
   const PressableCard({
     super.key,
     required this.child,
     this.onTap,
+    this.onLongPress,
     this.borderRadius = const BorderRadius.all(Radius.circular(22)),
+    this.style = const PressableTapStyle(),
   });
 
   @override
@@ -136,8 +208,10 @@ class _PressableCardState extends State<PressableCard> {
 
   @override
   Widget build(BuildContext context) {
-    final scale = _pressed ? 0.988 : (_hovered ? 1.01 : 1.0);
-    final translateY = _pressed ? 2.0 : (_hovered ? -4.0 : 0.0);
+    final scale =
+        _pressed ? widget.style.scale : (_hovered ? widget.style.hoverScale : 1.0);
+    final translateY =
+        _pressed ? 2.0 : (_hovered ? -widget.style.lift : 0.0);
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
@@ -148,15 +222,27 @@ class _PressableCardState extends State<PressableCard> {
       child: AnimatedScale(
         duration: const Duration(milliseconds: 160),
         scale: scale,
+        curve: Curves.easeOutCubic,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
           transform: Matrix4.translationValues(0, translateY, 0),
           child: Material(
             color: Colors.transparent,
             borderRadius: widget.borderRadius,
             child: InkWell(
-              onTap: widget.onTap,
+              onTap: widget.onTap == null
+                  ? null
+                  : () {
+                      if (widget.style.haptic) {
+                        HapticFeedback.selectionClick();
+                      }
+                      widget.onTap!();
+                    },
+              onLongPress: widget.onLongPress,
               borderRadius: widget.borderRadius,
+              splashColor: MarketplaceUi.primary.withValues(alpha: 0.08),
+              highlightColor: MarketplaceUi.primary.withValues(alpha: 0.04),
               onTapDown: (_) => setState(() => _pressed = true),
               onTapUp: (_) => setState(() => _pressed = false),
               onTapCancel: () => setState(() => _pressed = false),
@@ -167,4 +253,143 @@ class _PressableCardState extends State<PressableCard> {
       ),
     );
   }
+}
+
+/// Light-weight shimmer loader used as a placeholder for cards and tiles
+/// while remote data is being fetched. Looks much nicer than a single
+/// spinner and makes loading states feel intentional rather than blank.
+class ShimmerBox extends StatefulWidget {
+  const ShimmerBox({
+    super.key,
+    this.width,
+    this.height,
+    this.borderRadius,
+    this.baseColor = const Color(0xFFE9EEF7),
+    this.highlightColor = const Color(0xFFF6F8FC),
+  });
+
+  final double? width;
+  final double? height;
+  final BorderRadius? borderRadius;
+  final Color baseColor;
+  final Color highlightColor;
+
+  @override
+  State<ShimmerBox> createState() => _ShimmerBoxState();
+}
+
+class _ShimmerBoxState extends State<ShimmerBox>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = widget.borderRadius ?? BorderRadius.circular(14);
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (_, _) {
+        final t = _ctrl.value;
+        return Container(
+          width: widget.width,
+          height: widget.height,
+          decoration: BoxDecoration(
+            borderRadius: radius,
+            gradient: LinearGradient(
+              begin: Alignment(-1.0 + t * 2, -0.3),
+              end: Alignment(1.0 + t * 2, 0.3),
+              colors: [
+                widget.baseColor,
+                widget.highlightColor,
+                widget.baseColor,
+              ],
+              stops: const [0.35, 0.5, 0.65],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Fades children in with a subtle vertical drift the moment they mount.
+/// Use [delay] to stagger sibling items in a list/grid.
+class AppearOnMount extends StatefulWidget {
+  const AppearOnMount({
+    super.key,
+    required this.child,
+    this.delay = Duration.zero,
+    this.duration = const Duration(milliseconds: 360),
+    this.offsetY = 14,
+  });
+
+  final Widget child;
+  final Duration delay;
+  final Duration duration;
+  final double offsetY;
+
+  @override
+  State<AppearOnMount> createState() => _AppearOnMountState();
+}
+
+class _AppearOnMountState extends State<AppearOnMount>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _fade;
+  late final Animation<Offset> _slide;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: widget.duration);
+    final curved = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
+    _fade = Tween<double>(begin: 0, end: 1).animate(curved);
+    _slide = Tween<Offset>(
+      begin: Offset(0, widget.offsetY / 100),
+      end: Offset.zero,
+    ).animate(curved);
+    if (widget.delay == Duration.zero) {
+      _ctrl.forward();
+    } else {
+      Future.delayed(widget.delay, () {
+        if (mounted) _ctrl.forward();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _fade,
+      child: SlideTransition(position: _slide, child: widget.child),
+    );
+  }
+}
+
+/// Convenience helper to produce a staggered fade-in delay for the n-th item
+/// in a list/grid. Caps the delay so very long lists don't end up with the
+/// last items taking forever to appear.
+Duration staggerDelay(int index, {int step = 45, int maxMs = 360}) {
+  final ms = (index * step).clamp(0, maxMs);
+  return Duration(milliseconds: ms);
 }

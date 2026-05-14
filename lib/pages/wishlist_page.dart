@@ -121,22 +121,43 @@ class _WishlistPageState extends State<WishlistPage> {
                       child: InkWell(
                         borderRadius: BorderRadius.circular(14),
                         onTap: () async {
-                          // Fetch full product data before navigating
+                          // Fetch full product data before navigating. Pull
+                          // the seller's approval status so we can block the
+                          // navigation if the seller has been suspended.
                           try {
                             final product = await Supabase.instance.client
                                 .from('product')
-                                .select()
+                                .select(
+                                  '*, seller_profiles!product_seller_id_fkey(approval_status)',
+                                )
                                 .eq('id', productId)
                                 .maybeSingle();
-                            if (product != null && context.mounted) {
-                              await Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => ProductViewPage(product: product),
+                            if (!context.mounted) return;
+                            if (product == null) return;
+                            final sp = product['seller_profiles'];
+                            final sellerStatus = sp is Map
+                                ? sp['approval_status']
+                                      ?.toString()
+                                      .toLowerCase()
+                                : null;
+                            if (sellerStatus == 'suspended' ||
+                                sellerStatus == 'rejected') {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'This store is currently unavailable.',
+                                  ),
                                 ),
                               );
-                              _loadWishlist(); // refresh after returning
+                              return;
                             }
+                            await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => ProductViewPage(product: product),
+                              ),
+                            );
+                            _loadWishlist(); // refresh after returning
                           } catch (_) {}
                         },
                         child: Padding(

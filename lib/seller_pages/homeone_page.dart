@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/page_transitions.dart';
 import 'fill_business_info.dart'; // Make sure this file exists
 import 'dashboard_screen.dart'; // 👈 Import your Shop Dashboard file
 
@@ -126,9 +127,7 @@ class HomeOnePage  extends StatelessWidget {
 onPressed: () {
   Navigator.push(
     context,
-    MaterialPageRoute(
-      builder: (context) => FillBusinessInfoPage(), // ❌ removed const
-    ),
+    fadeSlideRoute((_) => const FillBusinessInfoPage()),
   );
 },
 

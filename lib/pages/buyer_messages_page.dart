@@ -305,7 +305,16 @@ class _BuyerMessagesPageState extends State<BuyerMessagesPage> {
                                       bottom: 28,
                                     ),
                                     children: [
-                                      ...visibleConversations.map(_conversationTile),
+                                      ...visibleConversations.asMap().entries.map(
+                                            (entry) => AppearOnMount(
+                                              delay: staggerDelay(
+                                                entry.key,
+                                                step: 40,
+                                                maxMs: 280,
+                                              ),
+                                              child: _conversationTile(entry.value),
+                                            ),
+                                          ),
                                     ],
                                   ),
                           ),

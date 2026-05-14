@@ -9,12 +9,15 @@ import 'package:file_picker/file_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../utils/market_geo.dart';
+import '../utils/marketplace_ui.dart' show AppearOnMount, staggerDelay;
+import '../utils/page_transitions.dart';
 
 // Defined constants for consistent design
 const Color kPrimaryBlue = Color(0xFF2A4BA0);
+const Color kPrimaryBlueDark = Color(0xFF132A63);
 const Color kInactiveGrey = Color(0xFFE0E0E0);
 const Color kTextGrey = Color(0xFF757575);
-const int kTotalSteps = 3;
+const int kTotalSteps = 4;
 
 class FillBusinessInfoPage extends StatefulWidget {
   const FillBusinessInfoPage({super.key});
@@ -37,6 +40,8 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
   String? _logoUrl;
   String? _bannerUrl;
   final List<String> _permitUrls = [];
+  String? _idUrl;
+  bool _isSubmitting = false;
 
   // Shop hours
   TimeOfDay _openingTime = const TimeOfDay(hour: 5, minute: 0);
@@ -48,6 +53,7 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
     if (_hasBankAccount) steps++;
     if (_permitCount > 0) steps++;
     if (_logoUrl != null) steps++;
+    if (_idUrl != null) steps++;
     return steps;
   }
 
@@ -276,8 +282,74 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
     }
   }
 
+  // --- GOVERNMENT ID UPLOAD FUNCTION ---
+  Future<void> _uploadIdPhoto(BuildContext context) async {
+    final supabase = Supabase.instance.client;
+    final userId = supabase.auth.currentUser?.id;
+
+    if (userId == null) {
+      _showActionSnackbar(context, "Error: User not logged in.", isError: true);
+      return;
+    }
+
+    FilePickerResult? result;
+    try {
+      result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+        withData: true,
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      _showActionSnackbar(context, "File Picker Error: $e", isError: true);
+      return;
+    }
+
+    if (!context.mounted) return;
+    if (result == null || result.files.isEmpty) {
+      _showActionSnackbar(context, "No file selected.");
+      return;
+    }
+
+    final pickedFile = result.files.single;
+    final Uint8List? fileBytes = pickedFile.bytes;
+
+    if (fileBytes == null || fileBytes.isEmpty) {
+      _showActionSnackbar(context, "Could not read file data.", isError: true);
+      return;
+    }
+
+    final ext = pickedFile.extension ?? 'jpg';
+    final uploadPath = '$userId/id/government_id.$ext';
+
+    _showActionSnackbar(context, "Uploading ID...");
+
+    try {
+      await supabase.storage.from('Permits').uploadBinary(
+        uploadPath,
+        fileBytes,
+        fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
+      );
+
+      final idPublicUrl = supabase.storage.from('Permits').getPublicUrl(uploadPath);
+
+      if (!context.mounted) return;
+      setState(() {
+        _idUrl = idPublicUrl;
+      });
+      _showActionSnackbar(context, "Government ID uploaded successfully!");
+    } on StorageException catch (e) {
+      if (!context.mounted) return;
+      _showActionSnackbar(context, "Upload Error: ${e.message}", isError: true);
+    } catch (e) {
+      if (!context.mounted) return;
+      _showActionSnackbar(context, "Upload failed: $e", isError: true);
+    }
+  }
+
   // --- FINAL SUBMISSION LOGIC ---
   Future<void> _submitDataToSupabase(BuildContext context) async {
+    if (_isSubmitting) return;
     final supabase = Supabase.instance.client;
     final userId = supabase.auth.currentUser?.id;
 
@@ -299,6 +371,7 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
       return;
     }
 
+    setState(() => _isSubmitting = true);
     _showActionSnackbar(context, "Saving business data...", isError: false);
 
     try {
@@ -326,7 +399,11 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
         'permit_count': _permitCount,
         'permit_urls': _permitUrls,
         'logo_url': _logoUrl,
+        // Persist the uploaded banner to both columns: banner_url drives the
+        // home carousel, cover_url drives the public store profile header.
         'banner_url': _bannerUrl,
+        if (_bannerUrl != null) 'cover_url': _bannerUrl,
+        'id_url': _idUrl,
         'opening_time': '${_openingTime.hour.toString().padLeft(2, '0')}:${_openingTime.minute.toString().padLeft(2, '0')}',
         'closing_time': '${_closingTime.hour.toString().padLeft(2, '0')}:${_closingTime.minute.toString().padLeft(2, '0')}',
         'is_open': false,
@@ -349,10 +426,17 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
         isError: false,
       );
 
-      // Navigate to the next stage
+      // Navigate to the final confirmation step, passing the values the
+      // seller already entered so the screen can show them as a read-only
+      // summary instead of asking for them a second time.
       Navigator.push(
         context,
-        MaterialPageRoute(builder: (context) => const BusinessProfileScreen()),
+        fadeSlideRoute(
+          (context) => BusinessProfileScreen(
+            initialStoreName: _storeNameController.text.trim(),
+            initialStoreAddress: _storeAddressController.text.trim(),
+          ),
+        ),
       );
     } on PostgrestException catch (e) {
       if (!context.mounted) return;
@@ -368,6 +452,8 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
         "An unexpected error occurred: $e",
         isError: true,
       );
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
@@ -521,160 +607,168 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
   Widget build(BuildContext context) {
     final double progress = _completedSteps / kTotalSteps;
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F8FC),
-      appBar: AppBar(
-        elevation: 0,
-        backgroundColor: Colors.white,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          'Fill your business information',
-          style: TextStyle(color: Colors.black, fontSize: 16),
-        ),
-        centerTitle: false,
-        // 🎯 NEW: Add a visual progress bar beneath the AppBar
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(4.0),
-          child: LinearProgressIndicator(
-            value: progress,
-            backgroundColor: kInactiveGrey,
-            valueColor: const AlwaysStoppedAnimation<Color>(kPrimaryBlue),
-          ),
-        ),
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: kPrimaryBlue.withValues(alpha: 0.07),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: kPrimaryBlue.withValues(alpha: 0.15)),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(10),
+      backgroundColor: const Color(0xFFF4F7FB),
+      body: SafeArea(
+        bottom: false,
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildHeroHeader(progress),
+              const SizedBox(height: 20),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+
+            // 1. Logo Upload Area
+            AppearOnMount(
+              delay: staggerDelay(0, step: 70),
+              child: Center(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  width: 116,
+                  height: 116,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    gradient: _logoUrl != null
+                        ? null
+                        : LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              kPrimaryBlue.withValues(alpha: 0.05),
+                              kPrimaryBlue.withValues(alpha: 0.02),
+                            ],
+                          ),
+                    border: Border.all(
+                      color: _logoUrl != null
+                          ? kPrimaryBlue
+                          : kPrimaryBlue.withValues(alpha: 0.3),
+                      width: _logoUrl != null ? 2.5 : 1.6,
                     ),
-                    child: const Icon(
-                      Icons.storefront_rounded,
-                      color: kPrimaryBlue,
+                    boxShadow: _logoUrl != null
+                        ? [
+                            BoxShadow(
+                              color: kPrimaryBlue.withValues(alpha: 0.18),
+                              blurRadius: 16,
+                              offset: const Offset(0, 8),
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.circular(20),
+                    child: InkWell(
+                      onTap: () => _uploadLogo(context),
+                      borderRadius: BorderRadius.circular(20),
+                      child: _logoUrl != null
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(18),
+                              child: Image.network(
+                                _logoUrl!,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) =>
+                                    _buildDefaultLogo(),
+                              ),
+                            )
+                          : _buildDefaultLogo(),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Business Setup Progress',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: kPrimaryBlue,
+                ),
+              ),
+            ),
+            const SizedBox(height: 26),
+
+            // Banner Upload Area
+            AppearOnMount(
+              delay: staggerDelay(1, step: 70),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "Store Banner",
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    "This banner will appear on the marketplace homepage.",
+                    style: TextStyle(color: kTextGrey, fontSize: 12.5),
+                  ),
+                  const SizedBox(height: 10),
+                  Material(
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.circular(16),
+                    child: InkWell(
+                      onTap: () => _uploadBanner(context),
+                      borderRadius: BorderRadius.circular(16),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOutCubic,
+                        width: double.infinity,
+                        height: 150,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          gradient: _bannerUrl != null
+                              ? null
+                              : LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    kPrimaryBlue.withValues(alpha: 0.05),
+                                    kPrimaryBlue.withValues(alpha: 0.02),
+                                  ],
+                                ),
+                          border: Border.all(
+                            color: _bannerUrl != null
+                                ? kPrimaryBlue
+                                : kPrimaryBlue.withValues(alpha: 0.3),
+                            width: _bannerUrl != null ? 2.5 : 1.6,
                           ),
+                          boxShadow: _bannerUrl != null
+                              ? [
+                                  BoxShadow(
+                                    color: kPrimaryBlue.withValues(alpha: 0.18),
+                                    blurRadius: 16,
+                                    offset: const Offset(0, 8),
+                                  ),
+                                ]
+                              : null,
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Complete all requirements to continue to profile completion.',
-                          style: TextStyle(
-                            color: Colors.black.withValues(alpha: 0.7),
-                            fontSize: 12.5,
-                          ),
-                        ),
-                      ],
+                        child: _bannerUrl != null
+                            ? ClipRRect(
+                                borderRadius: BorderRadius.circular(14),
+                                child: Image.network(
+                                  _bannerUrl!,
+                                  fit: BoxFit.cover,
+                                  width: double.infinity,
+                                  errorBuilder:
+                                      (context, error, stackTrace) =>
+                                          _buildDefaultBanner(),
+                                ),
+                              )
+                            : _buildDefaultBanner(),
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 16),
-
-            // 1. Logo Upload Area
-            InkWell(
-              onTap: () => _uploadLogo(context),
-              child: Center(
-                child: Container(
-                  width: 100,
-                  height: 100,
-                  decoration: BoxDecoration(
-                    border: Border.all(
-                      color: _logoUrl != null ? kPrimaryBlue : kInactiveGrey,
-                      width: 2,
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                    color: Colors.grey.shade50,
-                  ),
-                  child: _logoUrl != null
-                      ? ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: Image.network(
-                            _logoUrl!,
-                            fit: BoxFit.cover,
-                            // Added an error builder just in case the placeholder fails to load
-                            errorBuilder: (context, error, stackTrace) =>
-                                _buildDefaultLogo(),
-                          ),
-                        )
-                      : _buildDefaultLogo(),
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            // Banner Upload Area
-            const Text(
-              "Store Banner",
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              "This banner will appear on the marketplace homepage.",
-              style: TextStyle(color: kTextGrey, fontSize: 12),
-            ),
-            const SizedBox(height: 8),
-            InkWell(
-              onTap: () => _uploadBanner(context),
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                width: double.infinity,
-                height: 140,
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: _bannerUrl != null ? kPrimaryBlue : kInactiveGrey,
-                    width: 2,
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                  color: Colors.grey.shade50,
-                ),
-                child: _bannerUrl != null
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image.network(
-                          _bannerUrl!,
-                          fit: BoxFit.cover,
-                          width: double.infinity,
-                          errorBuilder: (context, error, stackTrace) =>
-                              _buildDefaultBanner(),
-                        ),
-                      )
-                    : _buildDefaultBanner(),
-              ),
-            ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 26),
 
             // Shop Hours Section
+            AppearOnMount(
+              delay: staggerDelay(2, step: 70),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
             const Text(
               "Shop Hours",
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
             ),
             const SizedBox(height: 4),
             const Text(
@@ -763,19 +857,27 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
                 ),
               ],
             ),
-            const SizedBox(height: 24),
+                ],
+              ),
+            ),
+            const SizedBox(height: 26),
 
             // 2. Business Category Dropdown
+            AppearOnMount(
+              delay: staggerDelay(3, step: 70),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
             const Text(
               "Business Category",
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
             ),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: Colors.grey.shade300),
               ),
               child: DropdownButtonHideUnderline(
@@ -807,9 +909,17 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
                 ),
               ),
             ),
+                ],
+              ),
+            ),
             const SizedBox(height: 20),
 
             // 3. Store Name Text Field
+            AppearOnMount(
+              delay: staggerDelay(4, step: 60),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
             _buildInputField(
               label: "Store Name",
               controller: _storeNameController,
@@ -832,35 +942,48 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
               hint: "e.g. Wet Market, Dry Goods",
               icon: Icons.grid_view_rounded,
             ),
+                ],
+              ),
+            ),
 
             // Pin location on map
-            const Text(
-              "Pin Store Location",
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              "Drop a pin on the map so buyers can find you.",
-              style: TextStyle(color: kTextGrey, fontSize: 12),
-            ),
-            const SizedBox(height: 8),
-            _StorePinPickerField(
-              pin: _pin,
-              onPicked: (p) => setState(() => _pin = p),
+            AppearOnMount(
+              delay: staggerDelay(5, step: 60),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "Pin Store Location",
+                    style:
+                        TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    "Drop a pin on the map so buyers can find you.",
+                    style: TextStyle(color: kTextGrey, fontSize: 12.5),
+                  ),
+                  const SizedBox(height: 8),
+                  _StorePinPickerField(
+                    pin: _pin,
+                    onPicked: (p) => setState(() => _pin = p),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 20),
-            Container(
+            AppearOnMount(
+              delay: staggerDelay(7, step: 60),
+              child: Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.grey.shade300),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: const Color(0xFFE3EAF4)),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.grey.withValues(alpha: 0.1),
-                    spreadRadius: 1,
-                    blurRadius: 5,
-                    offset: const Offset(0, 3),
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 16,
+                    offset: const Offset(0, 8),
                   ),
                 ],
               ),
@@ -874,16 +997,26 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
                       const Text(
                         'Your Store Setup Checklist',
                         style: TextStyle(
-                          fontWeight: FontWeight.bold,
+                          fontWeight: FontWeight.w800,
                           fontSize: 16,
                         ),
                       ),
-                      Text(
-                        '$_completedSteps/$kTotalSteps Complete',
-                        style: TextStyle(
-                          color: kPrimaryBlue,
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: kPrimaryBlue.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          '$_completedSteps/$kTotalSteps Complete',
+                          style: const TextStyle(
+                            color: kPrimaryBlue,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
                     ],
@@ -999,41 +1132,223 @@ class _FillBusinessInfoPageState extends State<FillBusinessInfoPage> {
                     ),
                   ),
 
+                  // Step 5: Government ID
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _ListItem(
+                          title: 'Government ID',
+                          subtitle: _idUrl != null
+                              ? 'ID uploaded successfully.'
+                              : 'Upload a valid government-issued ID (required)',
+                          onTap: () => _uploadIdPhoto(context),
+                          isCompleted: _idUrl != null,
+                          showRightArrow: false,
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(
+                            left: 32.0,
+                            top: 4,
+                            bottom: 8,
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  _idUrl != null
+                                      ? 'ID photo attached'
+                                      : 'No ID uploaded yet',
+                                  style: const TextStyle(
+                                    color: kTextGrey,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              SizedBox(
+                                height: 32,
+                                child: OutlinedButton.icon(
+                                  onPressed: () => _uploadIdPhoto(context),
+                                  icon: const Icon(Icons.badge_outlined, size: 18),
+                                  label: Text(
+                                    _idUrl != null ? 'Re-upload ID' : 'Upload ID',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: kPrimaryBlue,
+                                    side: const BorderSide(color: kPrimaryBlue),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
 
                 ],
               ),
+              ),
             ),
-            const SizedBox(height: 48),
-
-            // 5. Submit Button (Enabled only when all steps are complete)
-            SizedBox(
-              width: double.infinity,
-              height: 54,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: kPrimaryBlue,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  elevation: 5,
+                    const SizedBox(height: 32),
+                    AppearOnMount(
+                      delay: staggerDelay(8, step: 50),
+                      child: _BusinessSubmitButton(
+                        isReady: _completedSteps == kTotalSteps,
+                        isLoading: _isSubmitting,
+                        completed: _completedSteps,
+                        total: kTotalSteps,
+                        onPressed: () => _submitDataToSupabase(context),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
                 ),
-                onPressed: _completedSteps == kTotalSteps
-                    ? () => _submitDataToSupabase(context)
-                    : null, // Disable button if not all steps are complete
-                child: Text(
-                  _completedSteps == kTotalSteps
-                      ? 'Next: Complete Profile'
-                      : 'Complete All Steps ($_completedSteps/$kTotalSteps)',
-                  style: const TextStyle(
-                    fontSize: 18,
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Gradient hero header that replaces the old plain AppBar + setup-progress
+  /// banner. It carries the back arrow, page title, live "x/y complete" badge,
+  /// and an animated progress track — all in one polished block.
+  Widget _buildHeroHeader(double progress) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 26),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [kPrimaryBlue, kPrimaryBlueDark],
+        ),
+        borderRadius: BorderRadius.vertical(bottom: Radius.circular(32)),
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x2624439B),
+            blurRadius: 22,
+            offset: Offset(0, 12),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Material(
+                color: Colors.white.withValues(alpha: 0.16),
+                borderRadius: BorderRadius.circular(14),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () => Navigator.pop(context),
+                  child: const Padding(
+                    padding: EdgeInsets.all(10),
+                    child: Icon(
+                      Icons.arrow_back_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
                   ),
                 ),
               ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.2),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.task_alt_rounded,
+                      color: Colors.white,
+                      size: 14,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '$_completedSteps / $kTotalSteps',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            'Business setup',
+            style: TextStyle(
+              color: Color(0xFFC9D4F2),
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.6,
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Fill your store details',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+              height: 1.1,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            progress >= 1
+                ? 'Looks great — you can submit when you’re ready.'
+                : 'Knock out each requirement below to unlock submission.',
+            style: const TextStyle(
+              color: Color(0xFFD8E1F8),
+              fontSize: 12.5,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 18),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: progress),
+              duration: const Duration(milliseconds: 420),
+              curve: Curves.easeOutCubic,
+              builder: (_, value, _) => LinearProgressIndicator(
+                value: value,
+                minHeight: 8,
+                backgroundColor: Colors.white.withValues(alpha: 0.18),
+                valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1304,6 +1619,129 @@ class _StorePinPickerFieldState extends State<_StorePinPickerField> {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Modernised gradient submit button with loading + locked states. Matches
+/// the [`_FinalizeButton`] used on the next screen so the flow feels coherent.
+class _BusinessSubmitButton extends StatefulWidget {
+  const _BusinessSubmitButton({
+    required this.isReady,
+    required this.isLoading,
+    required this.completed,
+    required this.total,
+    required this.onPressed,
+  });
+
+  final bool isReady;
+  final bool isLoading;
+  final int completed;
+  final int total;
+  final VoidCallback onPressed;
+
+  @override
+  State<_BusinessSubmitButton> createState() => _BusinessSubmitButtonState();
+}
+
+class _BusinessSubmitButtonState extends State<_BusinessSubmitButton> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.isReady && !widget.isLoading;
+    final lockedLabel =
+        'Complete all steps (${widget.completed}/${widget.total})';
+
+    return AnimatedScale(
+      scale: _pressed && enabled ? 0.985 : 1,
+      duration: const Duration(milliseconds: 140),
+      curve: Curves.easeOutCubic,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          onTap: enabled ? widget.onPressed : null,
+          onTapDown: enabled ? (_) => setState(() => _pressed = true) : null,
+          onTapUp: enabled ? (_) => setState(() => _pressed = false) : null,
+          onTapCancel: enabled ? () => setState(() => _pressed = false) : null,
+          borderRadius: BorderRadius.circular(18),
+          child: Ink(
+            height: 58,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: enabled
+                    ? const [kPrimaryBlue, kPrimaryBlueDark]
+                    : const [Color(0xFFB5BCCB), Color(0xFF8892A8)],
+              ),
+              boxShadow: enabled
+                  ? [
+                      BoxShadow(
+                        color: kPrimaryBlue.withValues(alpha: 0.32),
+                        blurRadius: 22,
+                        offset: const Offset(0, 12),
+                      ),
+                    ]
+                  : const [],
+            ),
+            child: Center(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                child: widget.isLoading
+                    ? const Row(
+                        key: ValueKey('loading'),
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2.4,
+                            ),
+                          ),
+                          SizedBox(width: 12),
+                          Text(
+                            'Saving…',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      )
+                    : Row(
+                        key: ValueKey(enabled ? 'ready' : 'locked'),
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            enabled
+                                ? Icons.arrow_forward_rounded
+                                : Icons.lock_rounded,
+                            color: Colors.white,
+                            size: enabled ? 22 : 18,
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            enabled ? 'Next: Complete Profile' : lockedLabel,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 15.5,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+            ),
           ),
         ),
       ),

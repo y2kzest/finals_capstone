@@ -1,25 +1,40 @@
 import 'package:flutter/material.dart';
 
 /// Slide-from-right + fade transition, commonly used for forward navigation.
-Route<T> fadeSlideRoute<T>(WidgetBuilder builder, {Duration duration = const Duration(milliseconds: 280)}) {
+Route<T> fadeSlideRoute<T>(WidgetBuilder builder, {Duration duration = const Duration(milliseconds: 320)}) {
   return PageRouteBuilder<T>(
     transitionDuration: duration,
-    reverseTransitionDuration: const Duration(milliseconds: 220),
+    reverseTransitionDuration: const Duration(milliseconds: 240),
     pageBuilder: (context, animation, _) => builder(context),
-    transitionsBuilder: (_, animation, _, child) {
+    transitionsBuilder: (_, animation, secondary, child) {
       final curved = CurvedAnimation(
         parent: animation,
         curve: Curves.easeOutCubic,
         reverseCurve: Curves.easeInCubic,
       );
+      final secondaryCurved = CurvedAnimation(
+        parent: secondary,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
+      );
+      // Outgoing screen drifts slightly left + dims so the new page reads as
+      // a layer landing on top, not a flat swap.
+      final parallax = Tween<Offset>(
+        begin: Offset.zero,
+        end: const Offset(-0.05, 0),
+      ).animate(secondaryCurved);
+      final dim = Tween<double>(begin: 1, end: 0.94).animate(secondaryCurved);
       return FadeTransition(
         opacity: curved,
         child: SlideTransition(
           position: Tween<Offset>(
-            begin: const Offset(0.06, 0),
+            begin: const Offset(0.08, 0),
             end: Offset.zero,
           ).animate(curved),
-          child: child,
+          child: SlideTransition(
+            position: parallax,
+            child: FadeTransition(opacity: dim, child: child),
+          ),
         ),
       );
     },

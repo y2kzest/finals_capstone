@@ -12,7 +12,12 @@ import '../utils/helpers.dart';
 import '../utils/page_transitions.dart';
 
 class LoginPage extends StatefulWidget {
-  const LoginPage({super.key});
+  const LoginPage({super.key, this.startWithResetDialog = false});
+
+  /// When true, the page opens the "Set new password" dialog automatically
+  /// (used by the global passwordRecovery handler so the dialog appears
+  /// regardless of which page was active when the reset link was tapped).
+  final bool startWithResetDialog;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -72,7 +77,12 @@ class _LoginPageState extends State<LoginPage>
       begin: const Offset(0, 0.06),
       end: Offset.zero,
     ).animate(curved);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _entryCtrl.forward());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _entryCtrl.forward();
+      if (widget.startWithResetDialog) {
+        _showSetNewPasswordDialog();
+      }
+    });
   }
 
   @override
@@ -92,9 +102,9 @@ class _LoginPageState extends State<LoginPage>
     if (currentUser != null) {
       try {
         final profile = await supabase
-            .from('profile')
+            .from('profiles')
             .select('status')
-            .eq('user_id', currentUser.id)
+            .eq('id', currentUser.id)
             .maybeSingle();
         if (profile?['status'] == 'suspended') {
           await supabase.auth.signOut();

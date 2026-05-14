@@ -11,6 +11,7 @@ import 'pages/wishlist_page.dart';
 import 'pages/market_map_page.dart';
 import 'seller_pages/dashboard_screen.dart';
 import 'seller_pages/activate.dart';
+import 'utils/page_transitions.dart';
 
 const Color kDeepBlue = Color(0xFF153075);
 
@@ -1077,6 +1078,51 @@ class _ProfileState extends State<Profile> {
       );
     }
 
+    // Suspended seller → show suspended message
+    if (_isSeller && _sellerStatus == 'suspended') {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFEF2F2),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFFCA5A5)),
+          ),
+          child: const Row(
+            children: [
+              Icon(
+                Icons.block_rounded,
+                color: Color(0xFFDC2626),
+                size: 24,
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Seller Account Suspended',
+                      style: TextStyle(
+                        color: Color(0xFFDC2626),
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Your seller account has been suspended. Please contact the administrator.',
+                      style: TextStyle(color: Color(0xFF991B1B), fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     // Not a seller → show "Start Selling" button
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
@@ -1084,7 +1130,7 @@ class _ProfileState extends State<Profile> {
         onTap: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => const ActivateQuickcartScreen()),
+            fadeSlideRoute((_) => const ActivateQuickcartScreen()),
           );
         },
         borderRadius: BorderRadius.circular(14),

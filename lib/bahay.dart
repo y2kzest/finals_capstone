@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'profile.dart';
 import 'pages/home_page.dart';
 import 'pages/category_page.dart';
 import 'pages/buyer_messages_page.dart';
+import 'pages/login_page.dart';
 
 class Bahay extends StatelessWidget {
   const Bahay({super.key});
@@ -23,6 +26,44 @@ class MainNavigation extends StatefulWidget {
 
 class _MainNavigationState extends State<MainNavigation> {
   int _selectedIndex = 0;
+  final _supabase = Supabase.instance.client;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkSuspensionStatus();
+  }
+
+  Future<void> _checkSuspensionStatus() async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+    try {
+      final profile = await _supabase
+          .from('profiles')
+          .select('status')
+          .eq('id', user.id)
+          .maybeSingle();
+      if (!mounted) return;
+      if (profile?['status'] == 'suspended') {
+        await _supabase.auth.signOut();
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginPage()),
+          (route) => false,
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Your account has been suspended. Please contact the administrator.',
+            ),
+            backgroundColor: Color(0xFFDC2626),
+          ),
+        );
+      }
+    } catch (_) {
+      // Non-critical — if check fails, allow the user to continue
+    }
+  }
 
   // Keep only the tabs that are needed in the buyer app.
   final List<Widget> _pages = const [
@@ -56,6 +97,8 @@ class _MainNavigationState extends State<MainNavigation> {
   ];
 
   void _onItemTapped(int index) {
+    if (_selectedIndex == index) return;
+    HapticFeedback.selectionClick();
     setState(() {
       _selectedIndex = index;
     });

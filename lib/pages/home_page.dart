@@ -6,6 +6,8 @@ import '../services/buyer_location_service.dart';
 import '../services/cart_badge_service.dart';
 import '../services/pickup_preference_service.dart';
 import '../utils/helpers.dart';
+import '../utils/marketplace_ui.dart' show AppearOnMount, ShimmerBox, staggerDelay;
+import '../utils/page_transitions.dart';
 import 'cart_page.dart';
 import 'orders_page.dart';
 import 'productdet.dart';
@@ -21,6 +23,7 @@ class _HomePageState extends State<HomePage> {
   List<dynamic> products = [];
   bool isLoading = true;
   String _greetingName = 'Shopper';
+  String? _avatarUrl;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
@@ -33,6 +36,7 @@ class _HomePageState extends State<HomePage> {
   List<Map<String, dynamic>> _banners = [];
   late final PageController _bannerController;
   int _activeBannerIndex = 0;
+  Timer? _bannerAutoplay;
   RealtimeChannel? _notifChannel;
   final Set<String> _seenNotifIds = {};
 
@@ -213,6 +217,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _bannerAutoplay?.cancel();
     _bannerController.dispose();
     _searchFocusNode.removeListener(_handleSearchFocusChange);
     _searchFocusNode.dispose();
@@ -296,17 +301,35 @@ class _HomePageState extends State<HomePage> {
       final resp = await Supabase.instance.client
           .from('seller_profiles')
           .select(
-            'store_name, banner_url, logo_url, category, opening_time, closing_time, is_open, delivery_enabled',
+            'user_id, store_name, banner_url, logo_url, category, opening_time, closing_time, is_open, delivery_enabled, created_at',
           )
           .not('banner_url', 'is', null)
           .eq('approval_status', 'approved')
+          .order('created_at', ascending: false)
           .limit(10);
       if (mounted) {
         setState(() => _banners = List<Map<String, dynamic>>.from(resp));
+        _restartBannerAutoplay();
       }
     } catch (_) {
       // banner_url column may not exist yet
     }
+  }
+
+  void _restartBannerAutoplay() {
+    _bannerAutoplay?.cancel();
+    if (_banners.length < 2) return;
+    _bannerAutoplay = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted || _banners.isEmpty || !_bannerController.hasClients) {
+        return;
+      }
+      final next = (_activeBannerIndex + 1) % _banners.length;
+      _bannerController.animateToPage(
+        next,
+        duration: const Duration(milliseconds: 520),
+        curve: Curves.easeOutCubic,
+      );
+    });
   }
 
   void _showNotificationsSheet() {
@@ -817,16 +840,22 @@ class _HomePageState extends State<HomePage> {
 
     String? name;
 
+    String? avatar;
+
     try {
       final profile = await client
           .from('profile')
-          .select('name')
+          .select('name, avatar_url')
           .eq('user_id', user.id)
           .maybeSingle();
 
       final profileName = profile?['name']?.toString().trim();
       if (profileName != null && profileName.isNotEmpty) {
         name = profileName;
+      }
+      final profileAvatar = profile?['avatar_url']?.toString().trim();
+      if (profileAvatar != null && profileAvatar.isNotEmpty) {
+        avatar = profileAvatar;
       }
     } catch (_) {
       // Fall back to auth metadata/email when profile row is unavailable.
@@ -836,6 +865,8 @@ class _HomePageState extends State<HomePage> {
         user.userMetadata?['name']?.toString().trim() ??
         user.userMetadata?['full_name']?.toString().trim();
 
+    avatar ??= user.userMetadata?['avatar_url']?.toString().trim();
+
     final emailPrefix = user.email?.split('@').first.trim();
     if ((name == null || name.isEmpty) &&
         emailPrefix != null &&
@@ -843,10 +874,17 @@ class _HomePageState extends State<HomePage> {
       name = emailPrefix;
     }
 
-    if (name == null || name.isEmpty || !mounted) return;
+    if (!mounted) return;
+    if (name == null || name.isEmpty) {
+      if (avatar != null && avatar.isNotEmpty && _avatarUrl != avatar) {
+        setState(() => _avatarUrl = avatar);
+      }
+      return;
+    }
 
     setState(() {
       _greetingName = _formatDisplayName(name!);
+      _avatarUrl = avatar;
     });
   }
 
@@ -855,23 +893,39 @@ class _HomePageState extends State<HomePage> {
     return input[0].toUpperCase() + input.substring(1);
   }
 
+  /// Filters out products whose seller has been suspended (or rejected) by an
+  /// admin. Products with no joined `seller_profiles` row are kept so legacy
+  /// listings don't silently disappear.
+  List<dynamic> _hideSuspendedSellerProducts(dynamic raw) {
+    final list = raw is List ? raw : const <dynamic>[];
+    return list.where((item) {
+      if (item is! Map) return true;
+      final sp = item['seller_profiles'];
+      if (sp is! Map) return true;
+      final status = sp['approval_status']?.toString().toLowerCase();
+      return status != 'suspended' && status != 'rejected';
+    }).toList();
+  }
+
   Future<void> fetchProducts() async {
     if (mounted) {
       setState(() => isLoading = true);
     }
 
     try {
-      // Join with seller_profiles to get store name + shop hours + delivery flag
+      // Join with seller_profiles so we can hide products whose seller has
+      // been suspended by an admin. We also surface store name + hours +
+      // delivery flag for the cards.
       final response = await Supabase.instance.client
           .from('product')
           .select(
-            '*, seller_profiles!product_seller_id_fkey(store_name, is_open, opening_time, closing_time, delivery_enabled)',
+            '*, seller_profiles!product_seller_id_fkey(store_name, is_open, opening_time, closing_time, delivery_enabled, approval_status)',
           )
           .order('id', ascending: false);
 
       if (!mounted) return;
       setState(() {
-        products = response;
+        products = _hideSuspendedSellerProducts(response);
         isLoading = false;
       });
     } catch (e) {
@@ -1188,9 +1242,8 @@ class _HomePageState extends State<HomePage> {
   void _openProductDetail(dynamic product) {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) =>
-            ProductViewPage(product: Map<String, dynamic>.from(product)),
+      fadeSlideRoute(
+        (_) => ProductViewPage(product: Map<String, dynamic>.from(product)),
       ),
     );
   }
@@ -1459,12 +1512,40 @@ class _HomePageState extends State<HomePage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Hey, $_greetingName',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
+              Expanded(
+                child: Row(
+                  children: [
+                    _buildGreetingAvatar(),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text(
+                            'Welcome back',
+                            style: TextStyle(
+                              color: Color(0xFFC9D4F2),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Hey, $_greetingName',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 21,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
               Row(
@@ -1676,10 +1757,68 @@ class _HomePageState extends State<HomePage> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           if (_banners.isNotEmpty)
             Column(
               children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF5A524).withValues(alpha: 0.22),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: const Color(0xFFF5A524).withValues(alpha: 0.5),
+                        ),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.star_rounded,
+                            color: Color(0xFFFFCB6B),
+                            size: 13,
+                          ),
+                          SizedBox(width: 4),
+                          Text(
+                            'FEATURED',
+                            style: TextStyle(
+                              color: Color(0xFFFFD99A),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.6,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'Featured Stores',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${_banners.length}',
+                      style: const TextStyle(
+                        color: Color(0xFFC9D4F2),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
                 SizedBox(
                   height: 130,
                   child: PageView.builder(
@@ -2022,6 +2161,52 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildGreetingAvatar() {
+    final url = _avatarUrl;
+    final initials = _greetingName.trim().isEmpty
+        ? '?'
+        : _greetingName.trim()[0].toUpperCase();
+    return Container(
+      width: 46,
+      height: 46,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.white.withValues(alpha: 0.18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 1.6),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x33000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: (url != null && url.isNotEmpty)
+          ? Image.network(
+              url,
+              fit: BoxFit.cover,
+              loadingBuilder: (context, child, progress) =>
+                  progress == null ? child : _avatarFallback(initials),
+              errorBuilder: (_, _, _) => _avatarFallback(initials),
+            )
+          : _avatarFallback(initials),
+    );
+  }
+
+  Widget _avatarFallback(String initials) {
+    return Center(
+      child: Text(
+        initials,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 18,
+          fontWeight: FontWeight.w800,
+        ),
       ),
     );
   }
@@ -2413,9 +2598,17 @@ class _HomePageState extends State<HomePage> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        const crossAxisCount = 2;
+        // Scale up to 3+ columns on tablets/desktop so cards stay readable
+        // without becoming oversized on wide layouts.
+        final crossAxisCount = constraints.maxWidth >= 720
+            ? 4
+            : constraints.maxWidth >= 540
+                ? 3
+                : 2;
         const gridSpacing = 12.0;
-        final cardWidth = (constraints.maxWidth - gridSpacing) / crossAxisCount;
+        final cardWidth =
+            (constraints.maxWidth - gridSpacing * (crossAxisCount - 1)) /
+                crossAxisCount;
         final compactCard = cardWidth < 190;
         final ultraCompactCard = cardWidth < 170;
         final imageHeight = ultraCompactCard
@@ -2453,7 +2646,9 @@ class _HomePageState extends State<HomePage> {
             final priceText = priceValue != null ? '₱$priceValue /$unit' : '₱0';
             final categoryLabel = _categoryLabel(product);
 
-            return PressableCard(
+            return AppearOnMount(
+              delay: staggerDelay(index, step: 40, maxMs: 320),
+              child: PressableCard(
               onTap: () => _openProductDetail(product),
               borderRadius: BorderRadius.circular(20),
               child: Container(
@@ -2573,10 +2768,101 @@ class _HomePageState extends State<HomePage> {
                   ],
                 ),
               ),
+              ),
             );
           },
         );
       },
+    );
+  }
+
+  Widget _todayPickShimmerRow() {
+    return ListView.builder(
+      scrollDirection: Axis.horizontal,
+      itemCount: 4,
+      itemBuilder: (context, _) => Padding(
+        padding: const EdgeInsets.only(right: 14),
+        child: SizedBox(
+          width: 244,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ShimmerBox(
+                height: 112,
+                width: double.infinity,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              const SizedBox(height: 12),
+              ShimmerBox(
+                height: 14,
+                width: 160,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              const SizedBox(height: 8),
+              ShimmerBox(
+                height: 12,
+                width: 120,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              const SizedBox(height: 14),
+              ShimmerBox(
+                height: 18,
+                width: 90,
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _recommendedShimmerRow() {
+    return ListView.builder(
+      scrollDirection: Axis.horizontal,
+      itemCount: 4,
+      itemBuilder: (context, _) => Padding(
+        padding: const EdgeInsets.only(right: 14),
+        child: SizedBox(
+          width: 182,
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFFE8EDF6)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ShimmerBox(
+                  height: 112,
+                  width: double.infinity,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                const SizedBox(height: 12),
+                ShimmerBox(
+                  height: 13,
+                  width: 130,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                const SizedBox(height: 8),
+                ShimmerBox(
+                  height: 11,
+                  width: 90,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                const Spacer(),
+                ShimmerBox(
+                  height: 16,
+                  width: 70,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -2683,15 +2969,18 @@ class _HomePageState extends State<HomePage> {
                 SizedBox(
                   height: 248,
                   child: isLoading
-                      ? const Center(child: CircularProgressIndicator())
+                      ? _todayPickShimmerRow()
                       : visibleTodayPicks.isEmpty
                       ? const Center(child: Text("No products yet."))
                       : ListView.builder(
                           scrollDirection: Axis.horizontal,
                           itemCount: visibleTodayPicks.length,
                           itemBuilder: (context, index) {
-                            return _buildTodayPickCard(
-                              visibleTodayPicks[index],
+                            return AppearOnMount(
+                              delay: staggerDelay(index, step: 60),
+                              child: _buildTodayPickCard(
+                                visibleTodayPicks[index],
+                              ),
                             );
                           },
                         ),
@@ -2710,7 +2999,7 @@ class _HomePageState extends State<HomePage> {
                 SizedBox(
                   height: 308,
                   child: isLoading
-                      ? const Center(child: CircularProgressIndicator())
+                      ? _recommendedShimmerRow()
                       : recommendedProducts.isEmpty
                       ? const Center(child: Text("No products yet."))
                       : ListView.builder(
@@ -2729,7 +3018,9 @@ class _HomePageState extends State<HomePage> {
                                 ? "₱$priceValue /$unit"
                                 : "₱0";
 
-                            return ProductCard(
+                            return AppearOnMount(
+                              delay: staggerDelay(i, step: 55),
+                              child: ProductCard(
                               title: _productName(p, 'Fresh Item'),
                               storeName: _storeName(p, 'San Fernando Stall'),
                               price: priceText,
@@ -2747,6 +3038,7 @@ class _HomePageState extends State<HomePage> {
                               onAddPressed: () {
                                 _addToCart(p);
                               },
+                              ),
                             );
                           },
                         ),
@@ -3178,11 +3470,18 @@ class _HomeProductsListPage extends StatelessWidget {
                 ),
               ),
             )
-          : GridView.builder(
+          : LayoutBuilder(
+              builder: (context, constraints) {
+                final crossAxisCount = constraints.maxWidth >= 720
+                    ? 4
+                    : constraints.maxWidth >= 540
+                        ? 3
+                        : 2;
+                return GridView.builder(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 22),
               itemCount: products.length,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: crossAxisCount,
                 crossAxisSpacing: 12,
                 mainAxisSpacing: 12,
                 mainAxisExtent: 260,
@@ -3198,7 +3497,9 @@ class _HomeProductsListPage extends StatelessWidget {
                 final categoryLabel = categoryLabelOf(product);
                 final isOpen = isShopOpenOf(product);
 
-                return PressableCard(
+                return AppearOnMount(
+                  delay: staggerDelay(index, step: 35, maxMs: 280),
+                  child: PressableCard(
                   onTap: () => onTapProduct(product),
                   borderRadius: BorderRadius.circular(20),
                   child: Container(
@@ -3348,7 +3649,10 @@ class _HomeProductsListPage extends StatelessWidget {
                       ],
                     ),
                   ),
+                  ),
                 );
+              },
+            );
               },
             ),
     );

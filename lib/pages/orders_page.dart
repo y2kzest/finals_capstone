@@ -17,6 +17,7 @@ class OrdersPage extends StatefulWidget {
 class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateMixin {
   final supabase = Supabase.instance.client;
   late TabController _tabController;
+  RealtimeChannel? _ordersChannel;
   List<Map<String, dynamic>> _orders = [];
   bool _isLoading = true;
 
@@ -30,12 +31,38 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     super.initState();
     _tabController = TabController(length: _tabs.length, vsync: this);
     _fetchOrders();
+    _subscribeToOrderUpdates();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    if (_ordersChannel != null) {
+      supabase.removeChannel(_ordersChannel!);
+    }
     super.dispose();
+  }
+
+  // Push order status changes (accepted, declined, ready, completed) into the
+  // list instantly — the seller's update from their dashboard appears here
+  // without the buyer needing to pull-to-refresh.
+  void _subscribeToOrderUpdates() {
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
+    _ordersChannel = supabase
+        .channel('public:orders:buyer_${user.id}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'orders',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'buyer_id',
+            value: user.id,
+          ),
+          callback: (_) => _fetchOrders(),
+        )
+        .subscribe();
   }
 
   Future<void> _cancelOrder(Map<String, dynamic> order) async {

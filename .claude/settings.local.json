@@ -25,7 +25,16 @@
       "PowerShell($wl = \"c:\\\\Users\\\\Mark Renzo\\\\Downloads\\\\caps_pull2\\\\finals_capstone\\\\lib\\\\pages\\\\wishlist_page.dart\"; $lines = Get-Content $wl; for \\($i = 119; $i -le 145; $i++\\) { \"$\\($i+1\\): $\\($lines[$i]\\)\" })",
       "PowerShell($pd = \"c:\\\\Users\\\\Mark Renzo\\\\Downloads\\\\caps_pull2\\\\finals_capstone\\\\lib\\\\pages\\\\productdet.dart\"; $lines = Get-Content $pd; for \\($i = 240; $i -le 265; $i++\\) { \"$\\($i+1\\): $\\($lines[$i]\\)\" })",
       "PowerShell($inv = \"c:\\\\Users\\\\Mark Renzo\\\\Downloads\\\\caps_pull2\\\\finals_capstone\\\\lib\\\\seller_pages\\\\inventory.dart\"; $pos = \"c:\\\\Users\\\\Mark Renzo\\\\Downloads\\\\caps_pull2\\\\finals_capstone\\\\lib\\\\utils\\\\product_options_sheet.dart\"; $invlines = Get-Content $inv; $poslines = Get-Content $pos; \"inv 1292: $\\($invlines[1291]\\)\"; \"inv 1296: $\\($invlines[1295]\\)\"; \"pos 204: $\\($poslines[203]\\)\")",
-      "PowerShell($file = \"c:\\\\Users\\\\Mark Renzo\\\\Downloads\\\\caps_pull2\\\\finals_capstone\\\\lib\\\\seller_pages\\\\inventory.dart\"; $bytes = [System.IO.File]::ReadAllBytes\\($file\\); $text = [System.Text.Encoding]::UTF8.GetString\\($bytes\\); $lines = $text -split \"`n\"; $line = $lines[1291]; \"Line 1292 length: $\\($line.Length\\)\"; \"Chars 25-36: '$\\($line.Substring\\(24, [Math]::Min\\(12, $line.Length - 24\\)\\)\\)'\"; \"Char at 29 \\(0-indexed 28\\): '$\\($line[28]\\)'\"; \"Char at 29 code: $\\([int]$line[28]\\); Char at 30 code: $\\([int]$line[29]\\)\")"
+      "PowerShell($file = \"c:\\\\Users\\\\Mark Renzo\\\\Downloads\\\\caps_pull2\\\\finals_capstone\\\\lib\\\\seller_pages\\\\inventory.dart\"; $bytes = [System.IO.File]::ReadAllBytes\\($file\\); $text = [System.Text.Encoding]::UTF8.GetString\\($bytes\\); $lines = $text -split \"`n\"; $line = $lines[1291]; \"Line 1292 length: $\\($line.Length\\)\"; \"Chars 25-36: '$\\($line.Substring\\(24, [Math]::Min\\(12, $line.Length - 24\\)\\)\\)'\"; \"Char at 29 \\(0-indexed 28\\): '$\\($line[28]\\)'\"; \"Char at 29 code: $\\([int]$line[28]\\); Char at 30 code: $\\([int]$line[29]\\)\")",
+      "Bash(xargs grep -l \"permit\\\\|Permit\\\\|admin\\\\|Admin\")",
+      "Bash(find c:/Users/Admin/Downloads/caps_pull -name \"*.html\" -o -name \"*.js\" -o -name \"*.ts\" -o -name \"*.php\" 2>/dev/null | grep -v \"node_modules\\\\|\\\\.git\\\\|build\\\\|android\\\\|ios\" | head -30)",
+      "Read(//c/Users/Admin/Downloads/caps_pull/**)",
+      "Bash(ls c:/Users/Admin/Downloads/caps_pull/)",
+      "Bash(git -C c:/Users/Admin/Downloads/caps_pull/admin_dashboard diff --stat)",
+      "Bash(git -C c:/Users/Admin/Downloads/caps_pull diff --stat -- admin_dashboard/)",
+      "Bash(git -C c:/Users/Admin/Downloads/caps_pull diff --name-only)",
+      "Bash(flutter pub *)",
+      "Bash(findstr /i \"^[ ]*[└|├].*http\")"
     ]
   }
 }

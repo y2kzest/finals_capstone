@@ -33,6 +33,9 @@ dependencies:
   # PayMongo in-app checkout WebView
   webview_flutter: ^4.10.0
 
+  # Cross-platform HTTP (works on web; dart:io HttpClient does not)
+  http: ^1.1.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

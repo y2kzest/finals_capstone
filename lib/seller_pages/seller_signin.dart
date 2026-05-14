@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/seller_approval_notifications.dart';
+import '../utils/page_transitions.dart';
 import '../bahay.dart';
 import 'fill_business_info.dart';
 
@@ -81,14 +82,54 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
     if (userId == null || !mounted) return;
 
     try {
-      final profile = await supabase
+      // Check account suspension status
+      final accountProfile = await supabase
+          .from('profiles')
+          .select('status')
+          .eq('id', userId)
+          .maybeSingle();
+      if (accountProfile?['status'] == 'suspended') {
+        await supabase.auth.signOut();
+        _navigatedAfterAuth = false;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                'Your account has been suspended. Please contact the administrator.',
+              ),
+              backgroundColor: Colors.red.shade700,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Check seller-specific suspension
+      final sellerProfile = await supabase
           .from('seller_profiles')
-          .select('user_id')
+          .select('user_id, approval_status')
           .eq('user_id', userId)
           .maybeSingle();
 
       if (!mounted) return;
-      if (profile != null) {
+
+      if (sellerProfile?['approval_status'] == 'suspended') {
+        await supabase.auth.signOut();
+        _navigatedAfterAuth = false;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                'Your seller account has been suspended. Please contact the administrator.',
+              ),
+              backgroundColor: Colors.red.shade700,
+            ),
+          );
+        }
+        return;
+      }
+
+      if (sellerProfile != null) {
         // Profile already exists — go to buyer app (dashboard accessible from Profile)
         Navigator.pushAndRemoveUntil(
           context,
@@ -99,14 +140,14 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
         // New seller — complete profile setup
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const FillBusinessInfoPage()),
+          fadeSlideRoute((_) => const FillBusinessInfoPage()),
         );
       }
     } catch (_) {
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => const FillBusinessInfoPage()),
+        fadeSlideRoute((_) => const FillBusinessInfoPage()),
       );
     }
   }
@@ -170,9 +211,7 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
           );
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(
-              builder: (context) => const FillBusinessInfoPage(),
-            ),
+            fadeSlideRoute((_) => const FillBusinessInfoPage()),
           );
           return;
         }
@@ -200,9 +239,7 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
           // Navigate to the next step
           Navigator.push(
             context,
-            MaterialPageRoute(
-              builder: (context) => const FillBusinessInfoPage(),
-            ),
+            fadeSlideRoute((_) => const FillBusinessInfoPage()),
           );
         }
       } else if (res.user != null && res.session == null) {
@@ -282,9 +319,7 @@ class _SellerSignInPageState extends State<SellerSignInPage> {
 
               Navigator.pushReplacement(
                 context,
-                MaterialPageRoute(
-                  builder: (context) => const FillBusinessInfoPage(),
-                ),
+                fadeSlideRoute((_) => const FillBusinessInfoPage()),
               );
               return;
             }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -32,14 +34,47 @@ Future<void> main() async {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
+  late final StreamSubscription<AuthState> _authSub;
+
+  @override
+  void initState() {
+    super.initState();
+    // Global password-recovery handler — when the user taps the reset link
+    // in their email, route them to LoginPage with the reset dialog opened
+    // no matter what page they were last on.
+    _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      if (data.event == AuthChangeEvent.passwordRecovery) {
+        _navKey.currentState?.pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (_) => const LoginPage(startWithResetDialog: true),
+          ),
+          (_) => false,
+        );
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _authSub.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'QuickCart',
       debugShowCheckedModeBanner: false,
+      navigatorKey: _navKey,
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(

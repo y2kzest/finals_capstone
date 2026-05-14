@@ -7,6 +7,7 @@ import '../services/cart_badge_service.dart';
 import '../services/paymongo_service.dart';
 import '../services/pickup_preference_service.dart';
 import '../utils/delivery_route_preview.dart';
+import '../utils/marketplace_ui.dart' show ShimmerBox;
 import '../utils/page_transitions.dart';
 import 'orders_page.dart';
 import 'addresses_page.dart';
@@ -1350,12 +1351,7 @@ class _CartPageState extends State<CartPage> {
             _buildAppBar(),
             Expanded(
               child: _isLoading
-                  ? const Center(
-                      child: CircularProgressIndicator(
-                        color: _kPrimary,
-                        strokeWidth: 2.5,
-                      ),
-                    )
+                  ? _buildCartShimmer()
                   : _cartItems.isEmpty
                   ? _buildEmptyCart()
                   : RefreshIndicator(
@@ -2104,10 +2100,8 @@ class _CartPageState extends State<CartPage> {
     final unit = (item['unit_type'] ?? 'kg').toString();
     final imgUrl = _image(item);
     final subtotal = price * qty;
-    final isWeight = ['kg', 'g', 'gram', 'grams', 'lb', 'lbs', 'kilogram', 'kilograms']
-        .contains(unit.toLowerCase());
-    final step = isWeight ? 0.5 : 1.0;
-    final minQty = isWeight ? 0.5 : 1.0;
+    const step = 1.0;
+    const minQty = 1.0;
     String fmtQty(double v) =>
         v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
 
@@ -2513,6 +2507,66 @@ class _CartPageState extends State<CartPage> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildCartShimmer() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      children: [
+        ShimmerBox(height: 84, borderRadius: BorderRadius.circular(20)),
+        const SizedBox(height: 12),
+        ShimmerBox(height: 70, borderRadius: BorderRadius.circular(20)),
+        const SizedBox(height: 14),
+        ...List.generate(
+          3,
+          (_) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0xFFEDEFF6)),
+              ),
+              child: Row(
+                children: [
+                  ShimmerBox(
+                    width: 72,
+                    height: 72,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ShimmerBox(
+                          height: 14,
+                          width: 180,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        const SizedBox(height: 8),
+                        ShimmerBox(
+                          height: 12,
+                          width: 110,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        const SizedBox(height: 14),
+                        ShimmerBox(
+                          height: 18,
+                          width: 80,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

@@ -240,7 +240,11 @@ class _EditStoreInfoPageState extends State<EditStoreInfoPage> {
         'closing_time': _formatTimeOfDay(_closingTime),
         'is_open': _isOpen,
         if (newLogoUrl != null) 'logo_url': newLogoUrl,
+        // The seller uploads a single image but it powers two surfaces — the
+        // store profile cover and the marketplace "Featured Stores" banner.
+        // Keep both columns in sync so the home carousel reflects edits too.
         if (newCoverUrl != null) 'cover_url': newCoverUrl,
+        if (newCoverUrl != null) 'banner_url': newCoverUrl,
       };
       await _supabase.from('seller_profiles').update(updates).eq('user_id', userId);
 

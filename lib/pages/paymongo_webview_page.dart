@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -28,8 +28,14 @@ class PaymongoWebViewPage extends StatefulWidget {
 enum PaymongoWebResult { success, failed, cancelled }
 
 // Platforms where webview_flutter has a registered implementation.
-bool get _supportsWebView =>
-    Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
+// Using defaultTargetPlatform avoids dart:io Platform, which is not web-safe.
+bool get _supportsWebView {
+  if (kIsWeb) return false;
+  final p = defaultTargetPlatform;
+  return p == TargetPlatform.android ||
+      p == TargetPlatform.iOS ||
+      p == TargetPlatform.macOS;
+}
 
 class _PaymongoWebViewPageState extends State<PaymongoWebViewPage> {
   // --- WebView state ---

@@ -1,6 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
 
+import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
 /// A driving route from OSRM with the road geometry and ETA.
@@ -29,17 +29,13 @@ class OsrmRoute {
   }
 }
 
-/// Process-wide OSRM client: one shared HttpClient (no TLS handshake per call)
-/// and a tiny in-memory cache keyed by rounded coordinates so revisits hit
-/// cache even with small GPS jitter.
+/// Process-wide OSRM client. Uses package:http so it works on web as well
+/// as mobile (dart:io HttpClient throws Platform._version on web).
 class OsrmRouteService {
   OsrmRouteService._();
   static final OsrmRouteService instance = OsrmRouteService._();
 
-  final HttpClient _http = HttpClient()
-    ..connectionTimeout = const Duration(seconds: 6)
-    ..idleTimeout = const Duration(seconds: 30);
-
+  final http.Client _client = http.Client();
   final Map<String, OsrmRoute> _cache = {};
 
   String _key(LatLng a, LatLng b) {
@@ -62,15 +58,9 @@ class OsrmRouteService {
     );
 
     try {
-      final req =
-          await _http.getUrl(uri).timeout(const Duration(seconds: 6));
-      final res = await req.close().timeout(const Duration(seconds: 6));
-      if (res.statusCode != 200) {
-        await res.drain<void>();
-        return null;
-      }
-      final body = await res.transform(utf8.decoder).join();
-      final data = jsonDecode(body) as Map<String, dynamic>;
+      final res = await _client.get(uri).timeout(const Duration(seconds: 6));
+      if (res.statusCode != 200) return null;
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
       final routes = data['routes'] as List?;
       if (routes == null || routes.isEmpty) return null;
       final r = routes[0] as Map<String, dynamic>;

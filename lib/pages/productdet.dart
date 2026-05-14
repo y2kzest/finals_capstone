@@ -6,6 +6,7 @@ import '../services/paymongo_service.dart';
 import '../services/pickup_preference_service.dart';
 import '../utils/helpers.dart';
 import '../utils/distance_badge.dart';
+import '../utils/page_transitions.dart';
 import '../utils/product_options_sheet.dart';
 import '../utils/store_map_preview.dart';
 import 'addresses_page.dart';
@@ -1937,29 +1938,47 @@ class _ProductViewPageState extends State<ProductViewPage> {
       onPageChanged: (i) => setState(() => _currentImageIndex = i),
       itemBuilder: (_, i) {
         final url = images[i];
-        if (url.startsWith('assets/') || url.startsWith('images/')) {
-          return Image.asset(
-            url,
-            fit: BoxFit.cover,
-            errorBuilder: (_, _, _) => const Center(
-              child: Icon(
-                Icons.image_not_supported_outlined,
-                size: 54,
-                color: Color(0xFFB6BDCC),
+        return AnimatedBuilder(
+          animation: _imagePageController,
+          builder: (context, child) {
+            // Subtle parallax + scale so swiping through gallery feels fluid
+            // rather than a hard snap between full images.
+            double offset = 0;
+            if (_imagePageController.position.haveDimensions) {
+              offset = (_imagePageController.page ?? _currentImageIndex.toDouble()) - i;
+            }
+            final scale = (1 - (offset.abs() * 0.06)).clamp(0.92, 1.0);
+            return Transform.scale(
+              scale: scale,
+              child: Opacity(
+                opacity: (1 - offset.abs() * 0.4).clamp(0.5, 1.0),
+                child: child,
               ),
-            ),
-          );
-        }
-        return Image.network(
-          url,
-          fit: BoxFit.cover,
-          errorBuilder: (_, _, _) => const Center(
-            child: Icon(
-              Icons.broken_image_outlined,
-              size: 54,
-              color: Color(0xFFB6BDCC),
-            ),
-          ),
+            );
+          },
+          child: url.startsWith('assets/') || url.startsWith('images/')
+              ? Image.asset(
+                  url,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const Center(
+                    child: Icon(
+                      Icons.image_not_supported_outlined,
+                      size: 54,
+                      color: Color(0xFFB6BDCC),
+                    ),
+                  ),
+                )
+              : Image.network(
+                  url,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const Center(
+                    child: Icon(
+                      Icons.broken_image_outlined,
+                      size: 54,
+                      color: Color(0xFFB6BDCC),
+                    ),
+                  ),
+                ),
         );
       },
     );
@@ -2015,7 +2034,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
                   GestureDetector(
                     onTap: () => Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const CartPage()),
+                      fadeSlideRoute((_) => const CartPage()),
                     ),
                     child: ValueListenableBuilder<int>(
                       valueListenable: CartBadgeService.instance.count,
@@ -2199,8 +2218,8 @@ class _ProductViewPageState extends State<ProductViewPage> {
                               if (sellerId == null || sellerId.isEmpty) return;
                               Navigator.push(
                                 context,
-                                MaterialPageRoute(
-                                  builder: (_) => SellerProfilePage(
+                                fadeSlideRoute(
+                                  (_) => SellerProfilePage(
                                     sellerId: sellerId,
                                     initialStoreName: _sellerName,
                                   ),
@@ -2685,10 +2704,12 @@ class _ProductViewPageState extends State<ProductViewPage> {
   }
 
   Widget _indicator(bool active) {
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
       margin: const EdgeInsets.symmetric(horizontal: 4),
       height: 6,
-      width: active ? 20 : 8,
+      width: active ? 24 : 8,
       decoration: BoxDecoration(
         color: active ? const Color(0xFFF5A524) : Colors.grey.shade300,
         borderRadius: BorderRadius.circular(10),
