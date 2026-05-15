@@ -29,13 +29,32 @@ Future<void> main() async {
     }
   }
 
+  // Snapshot the URL on web BEFORE Supabase.initialize() — the SDK exchanges
+  // the recovery code for a session and then strips the auth params via
+  // history.replaceState, so by the time the first frame renders the URL is
+  // already clean. Without this snapshot we'd lose the only signal that the
+  // user arrived here via a password-reset link.
+  bool initialRecoveryLanding = false;
+  if (kIsWeb) {
+    final uri = Uri.base;
+    initialRecoveryLanding =
+        uri.queryParameters['type'] == 'recovery' ||
+        uri.fragment.contains('type=recovery');
+  }
+
   await Supabase.initialize(url: envUrl, anonKey: envAnon);
 
-  runApp(const MyApp());
+  runApp(MyApp(initialRecoveryLanding: initialRecoveryLanding));
 }
 
 class MyApp extends StatefulWidget {
-  const MyApp({super.key});
+  const MyApp({super.key, this.initialRecoveryLanding = false});
+
+  /// True when the app was launched via a Supabase password-recovery URL on
+  /// web. We use this to open the "Set new password" dialog on first frame
+  /// even if the SDK consumed the URL params before our auth listener was
+  /// attached (broadcast streams don't replay past events).
+  final bool initialRecoveryLanding;
 
   @override
   State<MyApp> createState() => _MyAppState();
@@ -180,7 +199,9 @@ class _MyAppState extends State<MyApp> {
           ),
         ),
       ),
-      home: const LoginPage(),
+      home: LoginPage(
+        startWithResetDialog: widget.initialRecoveryLanding,
+      ),
       routes: {'/home': (context) => const Bahay()},
     );
   }

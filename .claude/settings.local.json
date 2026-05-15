@@ -34,7 +34,9 @@
       "Bash(git -C c:/Users/Admin/Downloads/caps_pull diff --stat -- admin_dashboard/)",
       "Bash(git -C c:/Users/Admin/Downloads/caps_pull diff --name-only)",
       "Bash(flutter pub *)",
-      "Bash(findstr /i \"^[ ]*[└|├].*http\")"
+      "Bash(findstr /i \"^[ ]*[└|├].*http\")",
+      "PowerShell(flutter analyze lib/main.dart lib/pages/login_page.dart 2>&1)",
+      "PowerShell(flutter analyze lib/pages/login_page.dart 2>&1)"
     ]
   }
 }

@@ -60,6 +60,33 @@ class _ProfileState extends State<Profile> {
       return;
     }
 
+    try {
+      final accountProfile = await supabase
+          .from('profiles')
+          .select('status')
+          .eq('id', user.id)
+          .maybeSingle();
+      if (accountProfile?['status'] == 'suspended') {
+        await supabase.auth.signOut();
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const LoginPage()),
+          (route) => false,
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Your account has been suspended. Please contact the administrator.',
+            ),
+            backgroundColor: Color(0xFFDC2626),
+          ),
+        );
+        return;
+      }
+    } catch (_) {
+      // Non-critical — if check fails, fall through and load profile normally
+    }
+
     final userEmail = user.email ?? 'N/A';
 
     if (mounted) {

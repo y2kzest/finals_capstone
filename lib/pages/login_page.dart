@@ -79,7 +79,11 @@ class _LoginPageState extends State<LoginPage>
     ).animate(curved);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _entryCtrl.forward();
-      if (widget.startWithResetDialog) {
+      // Open the reset dialog if the caller asked us to OR if we landed
+      // here directly via a recovery URL (covers the case where the
+      // SDK emits `passwordRecovery` before any listener is attached,
+      // since broadcast streams don't replay past events).
+      if (widget.startWithResetDialog || _isRecoveryUrl()) {
         _showSetNewPasswordDialog();
       }
     });
@@ -136,15 +140,31 @@ class _LoginPageState extends State<LoginPage>
 
   String? _passwordResetRedirect() {
     if (kIsWeb) {
-      // Use the page's actual origin so the reset link returns the user to
-      // whichever domain is currently serving the app (prod, staging, or
-      // local dev) instead of the project's default Site URL.
-      return '${Uri.base.origin}/#/';
+      // Return the page origin WITHOUT the `/#/` hash-route suffix. Supabase
+      // appends `?code=...&type=recovery` (PKCE) to the redirect URL — if we
+      // keep `/#/`, those params land inside the URL fragment where the SDK
+      // can't see them, and the passwordRecovery event never fires.
+      return '${Uri.base.origin}/';
     }
     if (_useNativePasswordResetRedirect()) {
       return 'io.supabase.flutter://login-callback';
     }
     return null;
+  }
+
+  /// Returns true if the current URL looks like a Supabase password-recovery
+  /// landing (PKCE `?code=` + `type=recovery`, or implicit fragment with
+  /// `type=recovery`). Used as a safety net on web in case the SDK emits
+  /// `passwordRecovery` before our auth listener attaches.
+  bool _isRecoveryUrl() {
+    if (!kIsWeb) return false;
+    final uri = Uri.base;
+    if (uri.queryParameters['type'] == 'recovery') return true;
+    final frag = uri.fragment;
+    if (frag.isEmpty) return false;
+    // Fragment may look like `access_token=...&type=recovery` or
+    // `/?code=...&type=recovery` depending on flow/router setup.
+    return frag.contains('type=recovery');
   }
 
   final String _userAgreementContent =
@@ -438,7 +458,7 @@ class _LoginPageState extends State<LoginPage>
                                   if (mounted) {
                                     final message =
                                         _useNativePasswordResetRedirect()
-                                            ? 'Password reset link sent to $addr. Open it on this device to set a new password.'
+                                            ? "Reset link sent to $addr. Tap it from your email — if your email app shows it in a built-in browser, choose 'Open in browser' so it can return to QuickCart."
                                             : 'Password reset email sent to $addr. Open the link on this site to finish.';
                                     _showSnack(message);
                                   }
