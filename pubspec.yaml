@@ -11,6 +11,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_web_plugins:
+    sdk: flutter
   image_picker: ^1.0.7
   
   # Core App Dependencies
@@ -35,6 +37,9 @@ dependencies:
 
   # Cross-platform HTTP (works on web; dart:io HttpClient does not)
   http: ^1.1.0
+
+  # Persist recent searches between sessions
+  shared_preferences: ^2.2.0
 
 dev_dependencies:
   flutter_test:

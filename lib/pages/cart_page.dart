@@ -26,6 +26,10 @@ class _CartPageState extends State<CartPage> {
   final supabase = Supabase.instance.client;
   List<Map<String, dynamic>> _cartItems = [];
   Map<String, String> _sellerLogos = {};
+  // Per-seller delivery fee read from `seller_profiles.delivery_fee`. The
+  // cart adds these into the order total so the buyer pays the right
+  // amount based on each store's individual rate.
+  Map<String, double> _sellerDeliveryFees = {};
   bool _isLoading = true;
   bool _isCheckingOut = false;
   StreamSubscription<AuthState>? _authSub;
@@ -225,23 +229,33 @@ class _CartPageState extends State<CartPage> {
           .toSet()
           .toList();
       final Map<String, String> logos = {};
+      final Map<String, double> fees = {};
       if (sellerIds.isNotEmpty) {
         try {
           final profiles = await supabase
               .from('seller_profiles')
-              .select('user_id, logo_url')
+              .select('user_id, logo_url, delivery_fee, delivery_enabled')
               .inFilter('user_id', sellerIds);
           for (final p in profiles as List) {
             final id = p['user_id']?.toString();
+            if (id == null) continue;
             final logo = p['logo_url']?.toString();
-            if (id != null && logo != null && logo.isNotEmpty) logos[id] = logo;
+            if (logo != null && logo.isNotEmpty) logos[id] = logo;
+            // Only count the fee when the seller has delivery turned on.
+            final enabled = p['delivery_enabled'] == true;
+            final feeRaw = (p['delivery_fee'] as num?)?.toDouble() ?? 0;
+            if (enabled && feeRaw > 0) fees[id] = feeRaw;
           }
-        } catch (_) {}
+        } catch (_) {
+          // delivery_fee column may not exist yet — fees stay empty so
+          // the cart total just falls back to the subtotal.
+        }
       }
       if (!mounted) return;
       setState(() {
         _cartItems = items;
         _sellerLogos = logos;
+        _sellerDeliveryFees = fees;
         _isLoading = false;
       });
       CartBadgeService.instance.syncFromRows(items);
@@ -475,11 +489,14 @@ class _CartPageState extends State<CartPage> {
         return itemOrderType == 'pickup';
       });
 
-      // Ask the buyer how they want to pay (GCash / Maya / COD)
-      final cartTotal = _cartItems.fold<double>(
+      // Ask the buyer how they want to pay (GCash / Maya / COD). The total
+      // sent to the payment sheet now includes per-seller delivery fees so
+      // the buyer is charged the same amount they saw on the cart summary.
+      final cartSubtotal = _cartItems.fold<double>(
         0,
         (sum, i) => sum + _price(i['price']) * _qty(i['qty']),
       );
+      final cartTotal = cartSubtotal + _deliveryFeeTotal;
       setState(() => _isCheckingOut = false);
       if (!mounted) return;
       final paymentChoice = await Navigator.of(context).push<PaymentMethodChoice>(
@@ -538,6 +555,13 @@ class _CartPageState extends State<CartPage> {
           'status': 'pending',
           'pickup_code': pickupCode,
           'order_type': itemOrderType,
+          // Snapshot the seller's delivery fee on every order row so the
+          // amount the buyer sees on the order detail screen matches what
+          // they were charged at checkout, even if the seller later
+          // changes their fee. Only populated when this row is being
+          // delivered — pickup orders skip the fee entirely.
+          if (itemOrderType == 'delivery' && sellerId != null)
+            'delivery_fee': _sellerDeliveryFees[sellerId] ?? 0,
           'payment_method': paymentMethodCode,
           'payment_status': initialPaymentStatus,
           if ((item['selected_variant'] as String?)?.isNotEmpty == true)
@@ -1340,6 +1364,22 @@ class _CartPageState extends State<CartPage> {
   }
 
   int get _totalItems => _cartItems.length;
+
+  /// Sum of each distinct shop's delivery fee in this cart. Charged once
+  /// per store, regardless of how many items the buyer ordered from it.
+  double get _deliveryFeeTotal {
+    final sellerIds = _cartItems
+        .map((i) => i['seller_id']?.toString())
+        .whereType<String>()
+        .toSet();
+    var total = 0.0;
+    for (final id in sellerIds) {
+      total += _sellerDeliveryFees[id] ?? 0;
+    }
+    return total;
+  }
+
+  double get _grandTotal => _subtotal + _deliveryFeeTotal;
 
   @override
   Widget build(BuildContext context) {
@@ -2324,12 +2364,17 @@ class _CartPageState extends State<CartPage> {
           const SizedBox(height: 12),
           _summaryRow(
             'Subtotal ($_totalItems item${_totalItems == 1 ? '' : 's'})',
-            '\u20b1${_subtotal.toStringAsFixed(0)}',
+            '\u20b1${_subtotal.toStringAsFixed(2)}',
           ),
           const SizedBox(height: 8),
           _summaryRow('Shops', '${_groupByShop(_cartItems).length}'),
           const SizedBox(height: 8),
-          _summaryRow('Delivery fee', 'See checkout'),
+          _summaryRow(
+            'Delivery fee',
+            _deliveryFeeTotal > 0
+                ? '\u20b1${_deliveryFeeTotal.toStringAsFixed(2)}'
+                : 'Free',
+          ),
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 12),
             child: Divider(height: 1, color: Color(0xFFF3F4F6)),
@@ -2346,7 +2391,7 @@ class _CartPageState extends State<CartPage> {
               ),
               const Spacer(),
               Text(
-                '\u20b1${_subtotal.toStringAsFixed(0)}',
+                '\u20b1${_grandTotal.toStringAsFixed(2)}',
                 style: const TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w900,
@@ -2459,13 +2504,22 @@ class _CartPageState extends State<CartPage> {
                         ),
                       ),
                       Text(
-                        '\u20b1${_subtotal.toStringAsFixed(0)}',
+                        '\u20b1${_grandTotal.toStringAsFixed(2)}',
                         style: const TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.w900,
                           color: _kPrimary,
                         ),
                       ),
+                      if (_deliveryFeeTotal > 0)
+                        Text(
+                          'incl. \u20b1${_deliveryFeeTotal.toStringAsFixed(2)} delivery',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF6B7280),
+                          ),
+                        ),
                     ],
                   ),
                   const SizedBox(width: 16),

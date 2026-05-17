@@ -25,7 +25,8 @@ class ShopDashboardScreen extends StatefulWidget {
   State<ShopDashboardScreen> createState() => _ShopDashboardScreenState();
 }
 
-class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
+class _ShopDashboardScreenState extends State<ShopDashboardScreen>
+    with SingleTickerProviderStateMixin {
   String _userName = 'Seller';
   String _storeName = 'My Store';
   String _approvalStatus = 'pending';
@@ -40,14 +41,36 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
   List<Map<String, dynamic>> _recentOrders = [];
   bool _isShopOpen = false;
   bool _deliveryEnabled = false;
+  double _deliveryFee = 0;
   String _openingTime = '05:00';
   String _closingTime = '19:00';
+
+  late final AnimationController _entryCtrl;
+  late final Animation<double> _entryFade;
+  late final Animation<Offset> _entrySlide;
 
   @override
   void initState() {
     super.initState();
+    _entryCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 480),
+    );
+    final curved =
+        CurvedAnimation(parent: _entryCtrl, curve: Curves.easeOutCubic);
+    _entryFade = Tween<double>(begin: 0, end: 1).animate(curved);
+    _entrySlide = Tween<Offset>(
+      begin: const Offset(0, 0.04),
+      end: Offset.zero,
+    ).animate(curved);
     _fetchSellerData();
     _syncApprovalStatus();
+  }
+
+  @override
+  void dispose() {
+    _entryCtrl.dispose();
+    super.dispose();
   }
 
   // ── Approval sync ─────────────────────────────────────────
@@ -115,7 +138,9 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
     try {
       final response = await supabase
           .from('seller_profiles')
-          .select('full_name, store_name, logo_url, is_open, opening_time, closing_time, delivery_enabled')
+          .select(
+            'full_name, store_name, logo_url, is_open, opening_time, closing_time, delivery_enabled, delivery_fee',
+          )
           .eq('user_id', userId)
           .maybeSingle();
 
@@ -128,6 +153,8 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
           _openingTime = response['opening_time']?.toString() ?? '05:00';
           _closingTime = response['closing_time']?.toString() ?? '19:00';
           _deliveryEnabled = response['delivery_enabled'] == true;
+          _deliveryFee =
+              (response['delivery_fee'] as num?)?.toDouble() ?? 0;
         });
       }
 
@@ -235,6 +262,104 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
     }
   }
 
+  /// Persists the seller's per-order delivery fee. The cart reads this
+  /// value when computing the checkout total, so any change here flows
+  /// directly into the buyer's next order.
+  Future<void> _saveDeliveryFee(double value) async {
+    final supabase = Supabase.instance.client;
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) return;
+    final clamped = value < 0 ? 0.0 : value;
+    final previous = _deliveryFee;
+    setState(() => _deliveryFee = clamped);
+    try {
+      await supabase
+          .from('seller_profiles')
+          .update({'delivery_fee': clamped})
+          .eq('user_id', userId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              clamped == 0
+                  ? 'Free delivery enabled.'
+                  : 'Delivery fee saved as ₱${clamped.toStringAsFixed(2)}.',
+            ),
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Save delivery fee error: $e');
+      if (mounted) {
+        setState(() => _deliveryFee = previous);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not save delivery fee. Run the SQL '
+                'migration sql/add-delivery-fee-column.sql if this is '
+                'the first time.'),
+            duration: const Duration(seconds: 4),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _editDeliveryFee() async {
+    final controller = TextEditingController(
+      text: _deliveryFee == 0 ? '' : _deliveryFee.toStringAsFixed(2),
+    );
+    final result = await showDialog<double?>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text(
+          'Delivery fee',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'This amount is added to the buyer\'s order total at '
+              'checkout. Set to 0 to offer free delivery.',
+              style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(
+                prefixText: '₱ ',
+                hintText: '0.00',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final parsed = double.tryParse(controller.text.trim());
+              Navigator.pop(ctx, parsed ?? 0);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (result != null) await _saveDeliveryFee(result);
+  }
+
   void _goToTab(int idx) => setState(() => _selectedIndex = idx);
 
   // ── Build ─────────────────────────────────────────────────
@@ -261,16 +386,21 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
   // ── Home tab ──────────────────────────────────────────────
   Widget _buildHomeTab() {
     if (_isLoading) {
-      return const Center(
-          child: CircularProgressIndicator(color: kPrimary, strokeWidth: 3));
+      return SafeArea(child: _buildDashboardSkeleton());
     }
+    // Idempotent: forward() does nothing if already running/completed.
+    _entryCtrl.forward();
     return SafeArea(
       child: RefreshIndicator(
         color: kPrimary,
         onRefresh: () async {
           await Future.wait([_fetchSellerData(), _syncApprovalStatus()]);
         },
-        child: ListView(
+        child: FadeTransition(
+          opacity: _entryFade,
+          child: SlideTransition(
+            position: _entrySlide,
+            child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
           children: [
             // ── Top bar (greeting + avatar) ──
@@ -287,6 +417,10 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
 
             // ── Delivery toggle ──
             _buildDeliveryToggle(),
+            if (_deliveryEnabled) ...[
+              const SizedBox(height: 10),
+              _buildDeliveryFeeRow(),
+            ],
             const SizedBox(height: 16),
 
             // ── Approval banner ──
@@ -353,8 +487,83 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
             const SizedBox(height: 8),
             _buildRecentOrders(),
           ],
+            ),
+          ),
         ),
       ),
+    );
+  }
+
+  Widget _buildDashboardSkeleton() {
+    Widget bar(double width, double height, {double radius = 8}) {
+      return Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: const Color(0xFFE5E7EB),
+          borderRadius: BorderRadius.circular(radius),
+        ),
+      );
+    }
+
+    Widget block({required double height, double radius = 16}) {
+      return Container(
+        height: height,
+        decoration: BoxDecoration(
+          color: const Color(0xFFE5E7EB),
+          borderRadius: BorderRadius.circular(radius),
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+      physics: const NeverScrollableScrollPhysics(),
+      children: [
+        Row(
+          children: [
+            bar(48, 48, radius: 24),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  bar(120, 14),
+                  const SizedBox(height: 8),
+                  bar(160, 18),
+                ],
+              ),
+            ),
+            bar(40, 40, radius: 20),
+          ],
+        ),
+        const SizedBox(height: 20),
+        block(height: 130),
+        const SizedBox(height: 12),
+        block(height: 64),
+        const SizedBox(height: 10),
+        block(height: 64),
+        const SizedBox(height: 20),
+        Row(
+          children: List.generate(
+            3,
+            (i) => Expanded(
+              child: Padding(
+                padding: EdgeInsets.only(right: i == 2 ? 0 : 12),
+                child: block(height: 96),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        bar(110, 14),
+        const SizedBox(height: 12),
+        block(height: 110),
+        const SizedBox(height: 24),
+        bar(130, 14),
+        const SizedBox(height: 12),
+        block(height: 220),
+      ],
     );
   }
 
@@ -550,6 +759,97 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen> {
             activeTrackColor: const Color(0xFF059669),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildDeliveryFeeRow() {
+    const accent = Color(0xFF0891B2);
+    final feeLabel =
+        _deliveryFee == 0 ? 'Free delivery' : '₱${_deliveryFee.toStringAsFixed(2)}';
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: _editDeliveryFee,
+        splashColor: accent.withValues(alpha: 0.12),
+        child: Container(
+          padding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: kCard,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.03),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.payments_outlined,
+                  color: accent,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 14),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Delivery fee',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                        color: Color(0xFF111827),
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Added to the buyer\'s order total at checkout.',
+                      style: TextStyle(
+                          fontSize: 12, color: kTextSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  feeLabel,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: accent,
+                    fontSize: 12.5,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: Color(0xFF9CA3AF),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

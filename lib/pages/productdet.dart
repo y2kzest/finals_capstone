@@ -502,13 +502,15 @@ class _ProductViewPageState extends State<ProductViewPage> {
   double get _rating {
     final raw = widget.product['rating'];
     final parsed = double.tryParse(raw?.toString() ?? '');
-    return parsed ?? 4.6;
+    // 0 = no real rating yet; the UI renders "No ratings yet" instead of
+    // a fake 4.6 placeholder.
+    return parsed ?? 0;
   }
 
   int get _reviewCount {
     final raw = widget.product['reviews'];
     final parsed = int.tryParse(raw?.toString() ?? '');
-    return parsed ?? 110;
+    return parsed ?? 0;
   }
 
   double get _priceValue {
@@ -572,6 +574,15 @@ class _ProductViewPageState extends State<ProductViewPage> {
   double get _qtyStep => _isWeightUnit ? 0.5 : 1.0;
   double get _qtyMin => _isWeightUnit ? 0.5 : 1.0;
 
+  /// Clamp a quantity coming from any external source (cart edit, options
+  /// sheet, DB) so the displayed value can never be negative or fall below
+  /// the unit-specific minimum. Defends against corrupt cart rows or stale
+  /// data that would otherwise render as "-0.5" or "0".
+  double _clampQty(double q) {
+    if (q.isNaN || q < _qtyMin) return _qtyMin;
+    return q;
+  }
+
   String _formatQty(double qty) {
     if (qty == qty.truncateToDouble()) return qty.toStringAsFixed(0);
     return qty.toStringAsFixed(1);
@@ -593,7 +604,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
       showBuyNow: false,
     );
     if (result == null) return;
-    setState(() => _quantity = result.qty);
+    setState(() => _quantity = _clampQty(result.qty));
     await _addToCart(
       selectedVariant: result.selectedVariant?.name,
       note: result.note,
@@ -612,7 +623,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
       showBuyNow: true,
     );
     if (result == null) return;
-    setState(() => _quantity = result.qty);
+    setState(() => _quantity = _clampQty(result.qty));
     await _buyNow(
       selectedVariant: result.selectedVariant?.name,
       initialNote: result.note,
@@ -1726,7 +1737,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
 
     if (!mounted) return result;
     if (result != null && result.containsKey('qty')) {
-      setState(() => _quantity = (result['qty'] as num).toDouble());
+      setState(() => _quantity = _clampQty((result['qty'] as num).toDouble()));
     }
     return result;
   }
@@ -2087,56 +2098,44 @@ class _ProductViewPageState extends State<ProductViewPage> {
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
                 child: Column(
                   children: [
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 28,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(24),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Color(0x11000000),
-                            blurRadius: 14,
-                            offset: Offset(0, 6),
+                    // Hero product image — taller, borderless. The subtle
+                    // off-white backdrop shows through for transparent PNGs;
+                    // BoxFit.cover inside _buildDetailImage handles framing.
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Container(
+                        width: double.infinity,
+                        height: 340,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF7F8FC),
+                          borderRadius: BorderRadius.circular(22),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x11000000),
+                              blurRadius: 18,
+                              offset: Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(22),
+                          child: NotificationListener<ScrollNotification>(
+                            onNotification: (n) =>
+                                n.metrics.axis == Axis.horizontal,
+                            child: _buildDetailImage(),
                           ),
-                        ],
-                      ),
-                      child: Column(
-                        children: [
-                          Container(
-                            width: double.infinity,
-                            height: 200,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF2F3F7),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: const Color(0xFFE5E7F0),
-                              ),
-                            ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(20),
-                              child: NotificationListener<ScrollNotification>(
-                                onNotification: (n) =>
-                                    n.metrics.axis == Axis.horizontal,
-                                child: _buildDetailImage(),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          if (_productImages.length > 1)
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: List.generate(
-                                _productImages.length,
-                                (i) => _indicator(i == _currentImageIndex),
-                              ),
-                            ),
-                        ],
+                        ),
                       ),
                     ),
+                    const SizedBox(height: 12),
+                    if (_productImages.length > 1)
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: List.generate(
+                          _productImages.length,
+                          (i) => _indicator(i == _currentImageIndex),
+                        ),
+                      ),
                     const SizedBox(height: 14),
                     Container(
                       width: double.infinity,
@@ -2483,29 +2482,65 @@ class _ProductViewPageState extends State<ProductViewPage> {
                             ),
                           ],
                           const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.star,
-                                size: 18,
-                                color: Color(0xFFF5A524),
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                (_averageRating > 0 ? _averageRating : _rating)
-                                    .toStringAsFixed(1),
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                '${_reviews.isNotEmpty ? _reviews.length : _reviewCount} reviews',
-                                style: const TextStyle(
-                                  color: Color(0xFF8E95A6),
-                                ),
-                              ),
-                            ],
+                          Builder(
+                            builder: (context) {
+                              // Prefer the live computed average from the
+                              // reviews list; fall back to a value stored on
+                              // the product row. If neither is present, show
+                              // a clear "No ratings yet" hint instead of a
+                              // hardcoded 4.6 / 110 reviews placeholder.
+                              final liveAvg = _averageRating;
+                              final fallbackAvg = _rating;
+                              final reviewCount = _reviews.isNotEmpty
+                                  ? _reviews.length
+                                  : _reviewCount;
+                              final shownRating =
+                                  liveAvg > 0 ? liveAvg : fallbackAvg;
+                              final hasAnyRating =
+                                  shownRating > 0 || reviewCount > 0;
+                              if (!hasAnyRating) {
+                                return Row(
+                                  children: const [
+                                    Icon(
+                                      Icons.star_border_rounded,
+                                      size: 18,
+                                      color: Color(0xFF9CA3AF),
+                                    ),
+                                    SizedBox(width: 4),
+                                    Text(
+                                      'No ratings yet',
+                                      style: TextStyle(
+                                        color: Color(0xFF8E95A6),
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              }
+                              return Row(
+                                children: [
+                                  const Icon(
+                                    Icons.star,
+                                    size: 18,
+                                    color: Color(0xFFF5A524),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    shownRating.toStringAsFixed(1),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '$reviewCount ${reviewCount == 1 ? "review" : "reviews"}',
+                                    style: const TextStyle(
+                                      color: Color(0xFF8E95A6),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
                           ),
                           const SizedBox(height: 12),
                           SizedBox(
@@ -2577,12 +2612,23 @@ class _ProductViewPageState extends State<ProductViewPage> {
                 ),
               ),
             ),
+            // Sticky bottom action bar — sits outside the Expanded
+            // SingleChildScrollView so it stays pinned while the page
+            // content scrolls. The top shadow gives it a clear lift off
+            // the scroll surface.
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
               decoration: const BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Color(0x14000000),
+                    blurRadius: 18,
+                    offset: Offset(0, -6),
+                  ),
+                ],
               ),
               child: Column(
                 children: [
@@ -3081,18 +3127,24 @@ class _ProductViewPageState extends State<ProductViewPage> {
   }
 
   Widget _qtyButton({required IconData icon, required VoidCallback onTap}) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(999),
-      child: Container(
-        width: 34,
-        height: 34,
-        decoration: BoxDecoration(
-          color: const Color(0xFFF4F7FF),
-          border: Border.all(color: const Color(0xFFDDE3F5)),
-          borderRadius: BorderRadius.circular(999),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        splashColor: const Color(0x222A4BA0),
+        highlightColor: const Color(0x112A4BA0),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: const Color(0xFFF4F7FF),
+            border: Border.all(color: const Color(0xFFDDE3F5)),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Icon(icon, size: 18, color: const Color(0xFF2A4BA0)),
         ),
-        child: Icon(icon, size: 18, color: const Color(0xFF2A4BA0)),
       ),
     );
   }

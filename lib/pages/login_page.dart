@@ -1,7 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart'
-  show debugPrint, defaultTargetPlatform, kIsWeb, TargetPlatform;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -12,12 +11,7 @@ import '../utils/helpers.dart';
 import '../utils/page_transitions.dart';
 
 class LoginPage extends StatefulWidget {
-  const LoginPage({super.key, this.startWithResetDialog = false});
-
-  /// When true, the page opens the "Set new password" dialog automatically
-  /// (used by the global passwordRecovery handler so the dialog appears
-  /// regardless of which page was active when the reset link was tapped).
-  final bool startWithResetDialog;
+  const LoginPage({super.key});
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -36,6 +30,7 @@ class _LoginPageState extends State<LoginPage>
   bool _isLoading = false;
   bool _isOAuthLoading = false;
   bool _navigatedAfterAuth = false;
+  bool _resumingSession = false;
   late final StreamSubscription<AuthState> _authSub;
 
   late final AnimationController _entryCtrl;
@@ -51,13 +46,8 @@ class _LoginPageState extends State<LoginPage>
   void initState() {
     super.initState();
     _authSub = supabase.auth.onAuthStateChange.listen((data) {
-      if (data.event == AuthChangeEvent.passwordRecovery) {
-        // User tapped the reset link in their email — let them set a new one.
-        WidgetsBinding.instance.addPostFrameCallback(
-          (_) => _showSetNewPasswordDialog(),
-        );
-        return;
-      }
+      // Recovery is handled inline inside the OTP sheet now, so we
+      // deliberately ignore AuthChangeEvent.passwordRecovery here.
       if (data.event == AuthChangeEvent.signedIn && !_navigatedAfterAuth) {
         _navigatedAfterAuth = true;
         _navigateAfterSignIn();
@@ -79,12 +69,15 @@ class _LoginPageState extends State<LoginPage>
     ).animate(curved);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _entryCtrl.forward();
-      // Open the reset dialog if the caller asked us to OR if we landed
-      // here directly via a recovery URL (covers the case where the
-      // SDK emits `passwordRecovery` before any listener is attached,
-      // since broadcast streams don't replay past events).
-      if (widget.startWithResetDialog || _isRecoveryUrl()) {
-        _showSetNewPasswordDialog();
+      // Safety net for OAuth/restored sessions: if Supabase.initialize
+      // already established a session (e.g., the user just returned from
+      // Google sign-in with a `?code=` in the URL) the `signedIn` event may
+      // have fired before our listener attached. Detect it here and route
+      // forward so the user isn't stranded on the login screen.
+      if (!_navigatedAfterAuth && supabase.auth.currentSession != null) {
+        _navigatedAfterAuth = true;
+        setState(() => _resumingSession = true);
+        _navigateAfterSignIn();
       }
     });
   }
@@ -131,41 +124,6 @@ class _LoginPageState extends State<LoginPage>
   }
 
   bool _isEmail(String input) => isEmail(input);
-
-  bool _useNativePasswordResetRedirect() {
-    if (kIsWeb) return false;
-    return defaultTargetPlatform == TargetPlatform.android ||
-        defaultTargetPlatform == TargetPlatform.iOS;
-  }
-
-  String? _passwordResetRedirect() {
-    if (kIsWeb) {
-      // Return the page origin WITHOUT the `/#/` hash-route suffix. Supabase
-      // appends `?code=...&type=recovery` (PKCE) to the redirect URL — if we
-      // keep `/#/`, those params land inside the URL fragment where the SDK
-      // can't see them, and the passwordRecovery event never fires.
-      return '${Uri.base.origin}/';
-    }
-    if (_useNativePasswordResetRedirect()) {
-      return 'io.supabase.flutter://login-callback';
-    }
-    return null;
-  }
-
-  /// Returns true if the current URL looks like a Supabase password-recovery
-  /// landing (PKCE `?code=` + `type=recovery`, or implicit fragment with
-  /// `type=recovery`). Used as a safety net on web in case the SDK emits
-  /// `passwordRecovery` before our auth listener attaches.
-  bool _isRecoveryUrl() {
-    if (!kIsWeb) return false;
-    final uri = Uri.base;
-    if (uri.queryParameters['type'] == 'recovery') return true;
-    final frag = uri.fragment;
-    if (frag.isEmpty) return false;
-    // Fragment may look like `access_token=...&type=recovery` or
-    // `/?code=...&type=recovery` depending on flow/router setup.
-    return frag.contains('type=recovery');
-  }
 
   final String _userAgreementContent =
       "Welcome to QuickCart! By using our services, you agree to these terms:\n\n"
@@ -313,8 +271,12 @@ class _LoginPageState extends State<LoginPage>
 
     setState(() => _isOAuthLoading = true);
 
+    // On web, return to the SAME origin we're currently serving from. Passing
+    // `null` makes Supabase use the project's Site URL (often still pointing
+    // at localhost:3000 from defaults), which produces "site can't be reached"
+    // when the dev server is on a different port.
     final redirectUrl = kIsWeb
-        ? null
+        ? '${Uri.base.origin}/'
         : 'io.supabase.flutter://login-callback';
 
     try {
@@ -344,311 +306,410 @@ class _LoginPageState extends State<LoginPage>
     }
   }
 
+  /// Three-step password reset that uses the 8-digit OTP Supabase emails by
+  /// default. No redirect URL, no deployed site, no deep link required — the
+  /// user just reads the code from their inbox and types it in.
   Future<void> _showForgotPasswordSheet() async {
-    final ctrl = TextEditingController(text: _emailController.text.trim());
-    bool sending = false;
+    final emailCtrl = TextEditingController(text: _emailController.text.trim());
+    final otpCtrl = TextEditingController();
+    final pwdCtrl = TextEditingController();
+    final confirmCtrl = TextEditingController();
+
+    int step = 0; // 0 = enter email, 1 = enter code, 2 = set new password
+    bool busy = false;
+    bool obscurePw = true;
+    String sentTo = '';
+
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
+      isDismissible: true,
       builder: (ctx) {
         return StatefulBuilder(
-          builder: (ctx, setSheet) => Padding(
-            padding: EdgeInsets.only(
-              left: 20,
-              right: 20,
-              top: 18,
-              bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-            ),
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(22),
-              ),
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 38,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(2),
+          builder: (ctx, setSheet) {
+            Future<void> sendCode() async {
+              final addr = emailCtrl.text.trim();
+              if (!_isEmail(addr)) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('Enter a valid email.')),
+                );
+                return;
+              }
+              setSheet(() => busy = true);
+              try {
+                // resetPasswordForEmail triggers the recovery email, which
+                // contains BOTH a link and a 8-digit OTP. We only use the OTP.
+                await supabase.auth.resetPasswordForEmail(addr);
+                sentTo = addr;
+                setSheet(() {
+                  step = 1;
+                  busy = false;
+                });
+              } on AuthException catch (e) {
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(content: Text('Failed: ${e.message}')),
+                  );
+                }
+                setSheet(() => busy = false);
+              } catch (e) {
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(content: Text('Could not send code: $e')),
+                  );
+                }
+                setSheet(() => busy = false);
+              }
+            }
+
+            Future<void> verifyCode() async {
+              final code = otpCtrl.text.trim();
+              if (code.length != 8 || int.tryParse(code) == null) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(
+                    content: Text('Enter the 8-digit code from your email.'),
+                  ),
+                );
+                return;
+              }
+              setSheet(() => busy = true);
+              // verifyOTP(type: recovery) creates a recovery session and
+              // fires passwordRecovery. We pre-set _navigatedAfterAuth so
+              // any auth listener can't push the user out of this sheet
+              // while they're mid-flow.
+              _navigatedAfterAuth = true;
+              try {
+                await supabase.auth.verifyOTP(
+                  email: sentTo,
+                  token: code,
+                  type: OtpType.recovery,
+                );
+                setSheet(() {
+                  step = 2;
+                  busy = false;
+                });
+              } on AuthException catch (e) {
+                _navigatedAfterAuth = false;
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(content: Text('Invalid code: ${e.message}')),
+                  );
+                }
+                setSheet(() => busy = false);
+              } catch (e) {
+                _navigatedAfterAuth = false;
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(content: Text('Verification failed: $e')),
+                  );
+                }
+                setSheet(() => busy = false);
+              }
+            }
+
+            Future<void> updatePassword() async {
+              final pwd = pwdCtrl.text;
+              final confirm = confirmCtrl.text;
+              if (pwd.length < 6) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(
+                    content: Text('Password must be at least 6 characters.'),
+                  ),
+                );
+                return;
+              }
+              if (pwd != confirm) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('Passwords do not match.')),
+                );
+                return;
+              }
+              setSheet(() => busy = true);
+              // Step A: updateUser is the call that can legitimately fail
+              // (weak password, session expired). Errors here are reported.
+              try {
+                await supabase.auth.updateUser(UserAttributes(password: pwd));
+              } on AuthException catch (e) {
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(content: Text('Failed: ${e.message}')),
+                  );
+                  setSheet(() => busy = false);
+                }
+                return;
+              } catch (e) {
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(content: Text('Update failed: $e')),
+                  );
+                  setSheet(() => busy = false);
+                }
+                return;
+              }
+              // Step B: password changed — sign out the recovery session.
+              // If signOut throws, the password still changed; surface
+              // success and let post-sheet cleanup handle the stray session.
+              try {
+                await supabase.auth.signOut();
+              } catch (_) {}
+              _navigatedAfterAuth = false;
+              if (ctx.mounted) Navigator.pop(ctx);
+              if (mounted) {
+                _showSnack(
+                  'Password updated. Sign in with your new password.',
+                );
+              }
+            }
+
+            List<Widget> body;
+            if (step == 0) {
+              body = [
+                _resetHeader('Reset password', 'Step 1 of 3'),
+                const SizedBox(height: 10),
+                const Text(
+                  "Enter your email and we'll send you a 8-digit code.",
+                  style: TextStyle(color: Color(0xFF6B7280), fontSize: 13),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: emailCtrl,
+                  keyboardType: TextInputType.emailAddress,
+                  enabled: !busy,
+                  decoration: _decoration(
+                    hint: 'your.email@example.com',
+                    icon: Icons.mail_outline_rounded,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _sheetPrimaryButton(
+                  label: 'Send code',
+                  busy: busy,
+                  onPressed: busy ? null : sendCode,
+                ),
+              ];
+            } else if (step == 1) {
+              body = [
+                _resetHeader('Enter code', 'Step 2 of 3'),
+                const SizedBox(height: 10),
+                Text(
+                  "We sent a 8-digit code to $sentTo. It expires in a few minutes.",
+                  style: const TextStyle(
+                    color: Color(0xFF6B7280),
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: otpCtrl,
+                  keyboardType: TextInputType.number,
+                  enabled: !busy,
+                  maxLength: 8,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 6,
+                  ),
+                  textAlign: TextAlign.center,
+                  decoration: _decoration(
+                    hint: '••••••••',
+                    icon: Icons.numbers_rounded,
+                  ).copyWith(counterText: ''),
+                ),
+                const SizedBox(height: 8),
+                _sheetPrimaryButton(
+                  label: 'Verify code',
+                  busy: busy,
+                  onPressed: busy ? null : verifyCode,
+                ),
+                const SizedBox(height: 4),
+                TextButton(
+                  onPressed: busy
+                      ? null
+                      : () {
+                          otpCtrl.clear();
+                          setSheet(() => step = 0);
+                        },
+                  child: const Text("Didn't receive it? Use another email"),
+                ),
+              ];
+            } else {
+              body = [
+                _resetHeader('Set new password', 'Step 3 of 3'),
+                const SizedBox(height: 10),
+                const Text(
+                  'Choose a new password for your account.',
+                  style: TextStyle(color: Color(0xFF6B7280), fontSize: 13),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: pwdCtrl,
+                  obscureText: obscurePw,
+                  enabled: !busy,
+                  decoration: _decoration(
+                    hint: 'New password',
+                    icon: Icons.lock_outline_rounded,
+                    suffixIcon: IconButton(
+                      splashRadius: 18,
+                      icon: Icon(
+                        obscurePw
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                        color: Colors.grey[600],
+                        size: 20,
                       ),
+                      onPressed: () =>
+                          setSheet(() => obscurePw = !obscurePw),
                     ),
                   ),
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: confirmCtrl,
+                  obscureText: obscurePw,
+                  enabled: !busy,
+                  decoration: _decoration(
+                    hint: 'Confirm password',
+                    icon: Icons.lock_outline_rounded,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _sheetPrimaryButton(
+                  label: 'Update password',
+                  busy: busy,
+                  onPressed: busy ? null : updatePassword,
+                ),
+              ];
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 18,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+              ),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(22),
+                ),
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 38,
+                        height: 4,
                         decoration: BoxDecoration(
-                          color: kPrimary.withValues(alpha: 0.10),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Icon(
-                          Icons.lock_reset_outlined,
-                          color: kPrimary,
+                          color: Colors.grey.shade300,
+                          borderRadius: BorderRadius.circular(2),
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        child: Text(
-                          'Reset password',
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  const Text(
-                    "Enter your email and we'll send you a link to reset your password.",
-                    style: TextStyle(color: Color(0xFF6B7280), fontSize: 13),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: ctrl,
-                    keyboardType: TextInputType.emailAddress,
-                    decoration: _decoration(
-                      hint: 'your.email@example.com',
-                      icon: Icons.mail_outline_rounded,
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 52,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: kPrimaryDark,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      onPressed: sending
-                          ? null
-                          : () async {
-                              final addr = ctrl.text.trim();
-                              bool didClose = false;
-                              if (!_isEmail(addr)) {
-                                ScaffoldMessenger.of(ctx).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Enter a valid email.'),
-                                  ),
-                                );
-                                return;
-                              }
-                              setSheet(() => sending = true);
-                              try {
-                                final redirectTo = _passwordResetRedirect();
-                                await supabase.auth.resetPasswordForEmail(
-                                  addr,
-                                  redirectTo: redirectTo,
-                                );
-                                if (ctx.mounted) {
-                                  didClose = true;
-                                  Navigator.pop(ctx);
-                                  if (mounted) {
-                                    final message =
-                                        _useNativePasswordResetRedirect()
-                                            ? "Reset link sent to $addr. Tap it from your email — if your email app shows it in a built-in browser, choose 'Open in browser' so it can return to QuickCart."
-                                            : 'Password reset email sent to $addr. Open the link on this site to finish.';
-                                    _showSnack(message);
-                                  }
-                                }
-                              } on AuthException catch (e) {
-                                if (ctx.mounted) {
-                                  ScaffoldMessenger.of(ctx).showSnackBar(
-                                    SnackBar(
-                                      content: Text('Failed: ${e.message}'),
-                                    ),
-                                  );
-                                }
-                              } finally {
-                                if (ctx.mounted && !didClose) {
-                                  setSheet(() => sending = false);
-                                }
-                              }
-                            },
-                      child: sending
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.4,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Text(
-                              'Send reset link',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 15,
-                              ),
-                            ),
-                    ),
-                  ),
-                ],
+                    const SizedBox(height: 14),
+                    ...body,
+                  ],
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
-    ctrl.dispose();
-  }
 
-  Future<void> _showSetNewPasswordDialog() async {
-    if (!mounted) return;
-    final pwdCtrl = TextEditingController();
-    final confirmCtrl = TextEditingController();
-    bool busy = false;
-    bool obscure = true;
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialog) => AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          title: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: kPrimary.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.lock_reset_outlined, color: kPrimary),
-              ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text(
-                  'Set new password',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
-                ),
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                'Enter a new password for your account.',
-                style: TextStyle(color: Color(0xFF6B7280), fontSize: 13),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: pwdCtrl,
-                obscureText: obscure,
-                decoration: _decoration(
-                  hint: 'New password',
-                  icon: Icons.lock_outline_rounded,
-                  suffixIcon: IconButton(
-                    splashRadius: 18,
-                    icon: Icon(
-                      obscure
-                          ? Icons.visibility_off_outlined
-                          : Icons.visibility_outlined,
-                      color: Colors.grey[600],
-                      size: 20,
-                    ),
-                    onPressed: () => setDialog(() => obscure = !obscure),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: confirmCtrl,
-                obscureText: obscure,
-                decoration: _decoration(
-                  hint: 'Confirm password',
-                  icon: Icons.lock_outline_rounded,
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: busy ? null : () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: kPrimaryDark,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: busy
-                  ? null
-                  : () async {
-                      final pwd = pwdCtrl.text;
-                      final confirm = confirmCtrl.text;
-                      if (pwd.length < 6) {
-                        ScaffoldMessenger.of(ctx).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Password must be at least 6 characters.',
-                            ),
-                          ),
-                        );
-                        return;
-                      }
-                      if (pwd != confirm) {
-                        ScaffoldMessenger.of(ctx).showSnackBar(
-                          const SnackBar(
-                            content: Text('Passwords do not match.'),
-                          ),
-                        );
-                        return;
-                      }
-                      setDialog(() => busy = true);
-                      try {
-                        await supabase.auth.updateUser(
-                          UserAttributes(password: pwd),
-                        );
-                        if (ctx.mounted) Navigator.pop(ctx);
-                        if (mounted) {
-                          await supabase.auth.signOut();
-                          _showSnack(
-                            'Password updated. Sign in with your new password.',
-                          );
-                        }
-                      } on AuthException catch (e) {
-                        if (ctx.mounted) {
-                          ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(content: Text('Failed: ${e.message}')),
-                          );
-                        }
-                      } finally {
-                        if (ctx.mounted) setDialog(() => busy = false);
-                      }
-                    },
-              child: busy
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.4,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Text('Update'),
-            ),
-          ],
-        ),
-      ),
-    );
+    emailCtrl.dispose();
+    otpCtrl.dispose();
     pwdCtrl.dispose();
     confirmCtrl.dispose();
+
+    // Cleanup: regardless of how the sheet closed, leave the user in a
+    // sensible state. If a session is still active (verify succeeded then
+    // user cancelled, OR a verifyOTP that landed after dismiss) sign it
+    // out. Always reset _navigatedAfterAuth so future sign-ins navigate.
+    if (supabase.auth.currentSession != null) {
+      try {
+        await supabase.auth.signOut();
+      } catch (_) {}
+    }
+    _navigatedAfterAuth = false;
+  }
+
+  Widget _resetHeader(String title, String stepLabel) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: kPrimary.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Icon(Icons.lock_reset_outlined, color: kPrimary),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              Text(
+                stepLabel,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w500,
+                  color: Color(0xFF6B7280),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _sheetPrimaryButton({
+    required String label,
+    required bool busy,
+    required VoidCallback? onPressed,
+  }) {
+    return SizedBox(
+      width: double.infinity,
+      height: 52,
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: kPrimaryDark,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+        onPressed: onPressed,
+        child: busy
+            ? const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  color: Colors.white,
+                ),
+              )
+            : Text(
+                label,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                ),
+              ),
+      ),
+    );
   }
 
   void _showSnack(String message, {bool isError = false}) {
@@ -731,6 +792,28 @@ class _LoginPageState extends State<LoginPage>
 
   @override
   Widget build(BuildContext context) {
+    if (_resumingSession) {
+      return const Scaffold(
+        backgroundColor: Colors.white,
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(color: kPrimary),
+              SizedBox(height: 14),
+              Text(
+                'Signing you in…',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: kPrimaryDark,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     final isEmailInput = _isEmail(_emailController.text.trim());
     final canSubmit = isEmailInput && _passwordController.text.isNotEmpty;
 

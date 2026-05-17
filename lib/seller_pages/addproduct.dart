@@ -89,7 +89,7 @@ class _AddProductPageState extends State<AddProductPage> {
     if (nameCtrl.text.isEmpty ||
         priceCtrl.text.isEmpty ||
         (!isApparel && !isKarinderya && retailPriceCtrl.text.isEmpty) ||
-        (!isApparel && !isKarinderya && stockCtrl.text.isEmpty)) {
+        (!isKarinderya && stockCtrl.text.isEmpty)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please fill all required fields.")),
       );
@@ -151,7 +151,7 @@ class _AddProductPageState extends State<AddProductPage> {
       'category': selectedCategory,
       'price': priceValue,
       'retail_price': (isApparel || isKarinderya) ? 0 : (retailPriceValue ?? 0),
-      'stock_quantity': (isApparel || isKarinderya) ? 0 : (double.tryParse(stockCtrl.text)?.toInt() ?? 0),
+      'stock_quantity': isKarinderya ? 0 : (double.tryParse(stockCtrl.text)?.toInt() ?? 0),
       'unit_type': (isApparel) ? 'pcs' : selectedUnit,
       'description': descriptionCtrl.text,
       'image_url': imageUrls.isNotEmpty ? imageUrls.first : null,
@@ -319,6 +319,9 @@ class _AddProductPageState extends State<AddProductPage> {
                     ] else if (selectedCategory == 'Apparel') ...[
                       _modernField(label: 'Price', controller: priceCtrl,
                           icon: Icons.payments_outlined, prefix: '₱', isNumber: true),
+                      const SizedBox(height: 14),
+                      _modernField(label: 'Stock Qty', controller: stockCtrl,
+                          icon: Icons.inventory_outlined, isNumber: true),
                     ] else ...[
                       Row(children: [
                         Expanded(child: _modernField(label: 'Price', controller: priceCtrl,

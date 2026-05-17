@@ -1,8 +1,7 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'bahay.dart';
@@ -15,6 +14,15 @@ const String kSupabaseAnonKey =
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // On Flutter web, default hash routing (`/#/`) strips the `?code=` query
+  // param after a Google OAuth redirect — Supabase never sees the code and
+  // the user is stuck on the login screen. Path strategy keeps the query
+  // intact so `Supabase.initialize`'s `detectSessionInUri` can finish the
+  // PKCE exchange. No-op on mobile.
+  if (kIsWeb) {
+    usePathUrlStrategy();
+  }
 
   String envUrl = kSupabaseUrl;
   String envAnon = kSupabaseAnonKey;
@@ -29,71 +37,19 @@ Future<void> main() async {
     }
   }
 
-  // Snapshot the URL on web BEFORE Supabase.initialize() — the SDK exchanges
-  // the recovery code for a session and then strips the auth params via
-  // history.replaceState, so by the time the first frame renders the URL is
-  // already clean. Without this snapshot we'd lose the only signal that the
-  // user arrived here via a password-reset link.
-  bool initialRecoveryLanding = false;
-  if (kIsWeb) {
-    final uri = Uri.base;
-    initialRecoveryLanding =
-        uri.queryParameters['type'] == 'recovery' ||
-        uri.fragment.contains('type=recovery');
-  }
-
   await Supabase.initialize(url: envUrl, anonKey: envAnon);
 
-  runApp(MyApp(initialRecoveryLanding: initialRecoveryLanding));
+  runApp(const MyApp());
 }
 
-class MyApp extends StatefulWidget {
-  const MyApp({super.key, this.initialRecoveryLanding = false});
-
-  /// True when the app was launched via a Supabase password-recovery URL on
-  /// web. We use this to open the "Set new password" dialog on first frame
-  /// even if the SDK consumed the URL params before our auth listener was
-  /// attached (broadcast streams don't replay past events).
-  final bool initialRecoveryLanding;
-
-  @override
-  State<MyApp> createState() => _MyAppState();
-}
-
-class _MyAppState extends State<MyApp> {
-  final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
-  late final StreamSubscription<AuthState> _authSub;
-
-  @override
-  void initState() {
-    super.initState();
-    // Global password-recovery handler — when the user taps the reset link
-    // in their email, route them to LoginPage with the reset dialog opened
-    // no matter what page they were last on.
-    _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
-      if (data.event == AuthChangeEvent.passwordRecovery) {
-        _navKey.currentState?.pushAndRemoveUntil(
-          MaterialPageRoute(
-            builder: (_) => const LoginPage(startWithResetDialog: true),
-          ),
-          (_) => false,
-        );
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _authSub.cancel();
-    super.dispose();
-  }
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'QuickCart',
       debugShowCheckedModeBanner: false,
-      navigatorKey: _navKey,
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
@@ -199,9 +155,7 @@ class _MyAppState extends State<MyApp> {
           ),
         ),
       ),
-      home: LoginPage(
-        startWithResetDialog: widget.initialRecoveryLanding,
-      ),
+      home: const LoginPage(),
       routes: {'/home': (context) => const Bahay()},
     );
   }

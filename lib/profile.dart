@@ -7,6 +7,7 @@ import 'pages/login_page.dart';
 import 'pages/orders_page.dart';
 import 'pages/addresses_page.dart';
 import 'pages/buyer_messages_page.dart';
+import 'pages/vouchers_page.dart';
 import 'pages/wishlist_page.dart';
 import 'pages/market_map_page.dart';
 import 'seller_pages/dashboard_screen.dart';
@@ -22,7 +23,8 @@ class Profile extends StatefulWidget {
   State<Profile> createState() => _ProfileState();
 }
 
-class _ProfileState extends State<Profile> {
+class _ProfileState extends State<Profile>
+    with SingleTickerProviderStateMixin {
   // Initialize Supabase Client
   final SupabaseClient supabase = Supabase.instance.client;
 
@@ -35,11 +37,35 @@ class _ProfileState extends State<Profile> {
   int _orderCount = 0;
   int _activeOrderCount = 0; // orders with status pending/accepted/ready
   int _wishlistCount = 0;
+  int _voucherCount = 0;
+
+  late final AnimationController _entryCtrl;
+  late final Animation<double> _entryFade;
+  late final Animation<Offset> _entrySlide;
 
   @override
   void initState() {
     super.initState();
+    _entryCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 480),
+    );
+    final curved = CurvedAnimation(
+      parent: _entryCtrl,
+      curve: Curves.easeOutCubic,
+    );
+    _entryFade = Tween<double>(begin: 0, end: 1).animate(curved);
+    _entrySlide = Tween<Offset>(
+      begin: const Offset(0, 0.04),
+      end: Offset.zero,
+    ).animate(curved);
     _fetchUserProfile();
+  }
+
+  @override
+  void dispose() {
+    _entryCtrl.dispose();
+    super.dispose();
   }
 
   // --- Supabase Data Fetching & Creation ---
@@ -129,6 +155,18 @@ class _ProfileState extends State<Profile> {
           .eq('user_id', user.id);
       if (mounted) {
         setState(() => _wishlistCount = (wishlistRes as List).length);
+      }
+    } catch (_) {}
+
+    // Fetch voucher count (table may not exist yet — silent fallback to 0).
+    try {
+      final voucherRes = await supabase
+          .from('vouchers')
+          .select('id')
+          .eq('user_id', user.id)
+          .filter('used_at', 'is', null);
+      if (mounted) {
+        setState(() => _voucherCount = (voucherRes as List).length);
       }
     } catch (_) {}
     try {
@@ -619,17 +657,105 @@ class _ProfileState extends State<Profile> {
     }
   }
 
+  /// Skeleton placeholder shown while the profile + counts are loading.
+  /// Mirrors the real layout (gradient header, stat row, quick-action row,
+  /// info card) so the transition to loaded state doesn't shift content.
+  Widget _buildSkeleton() {
+    Widget shimmer(double width, double height, {double radius = 8}) {
+      return Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: const Color(0xFFE5E7EB),
+          borderRadius: BorderRadius.circular(radius),
+        ),
+      );
+    }
+
+    Widget shimmerBox({required double height, double radius = 16}) {
+      return Container(
+        height: height,
+        decoration: BoxDecoration(
+          color: const Color(0xFFE5E7EB),
+          borderRadius: BorderRadius.circular(radius),
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(18, 14, 18, 28),
+      physics: const NeverScrollableScrollPhysics(),
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 8, bottom: 12),
+          child: shimmer(140, 28),
+        ),
+        // Header card placeholder
+        Container(
+          padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            color: const Color(0xFFEDEFF5),
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  shimmer(68, 68, radius: 34),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        shimmer(90, 14),
+                        const SizedBox(height: 10),
+                        shimmer(160, 18),
+                        const SizedBox(height: 8),
+                        shimmer(120, 12),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              shimmerBox(height: 64),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        shimmerBox(height: 66),
+        const SizedBox(height: 14),
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 10),
+          child: shimmer(100, 14),
+        ),
+        Row(
+          children: List.generate(4, (i) {
+            return Padding(
+              padding: EdgeInsets.only(right: i == 3 ? 0 : 10),
+              child: shimmerBox(height: 68),
+            );
+          }).map((w) => Expanded(child: w)).toList(),
+        ),
+        const SizedBox(height: 16),
+        shimmerBox(height: 280),
+      ],
+    );
+  }
+
   Widget _buildQuickActionTile({
     required IconData icon,
     required String label,
     required VoidCallback onTap,
     int badge = 0,
   }) {
-    return InkWell(
+    // Background, border and shadow live on the outer Container so the
+    // Material/InkWell can paint a visible ripple on its own transparent
+    // surface — the old `Ink` version painted its white decoration on the
+    // Material surface and blocked the splash from ever showing.
+    return _PressableTile(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Ink(
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+      child: Container(
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
@@ -642,49 +768,62 @@ class _ProfileState extends State<Profile> {
             ),
           ],
         ),
-        child: Column(
-          children: [
-            Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Icon(icon, color: kDeepBlue, size: 24),
-                if (badge > 0)
-                  Positioned(
-                    right: -8,
-                    top: -6,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 5,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFDC2626),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.white, width: 1.5),
-                      ),
-                      child: Text(
-                        badge > 99 ? '99+' : '$badge',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w800,
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(14),
+            splashColor: kDeepBlue.withValues(alpha: 0.16),
+            highlightColor: kDeepBlue.withValues(alpha: 0.06),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+              child: Column(
+                children: [
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Icon(icon, color: kDeepBlue, size: 24),
+                      if (badge > 0)
+                        Positioned(
+                          right: -8,
+                          top: -6,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFDC2626),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: Colors.white, width: 1.5),
+                            ),
+                            child: Text(
+                              badge > 99 ? '99+' : '$badge',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 9,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87,
                     ),
                   ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: Colors.black87,
+                ],
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -883,9 +1022,12 @@ class _ProfileState extends State<Profile> {
                 Expanded(
                   child: _ProfileStatTile(
                     icon: Icons.local_offer_outlined,
-                    value: '0',
+                    value: '$_voucherCount',
                     label: 'Vouchers',
-                    onTap: null,
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const VouchersPage()),
+                    ),
                   ),
                 ),
               ],
@@ -1221,10 +1363,15 @@ class _ProfileState extends State<Profile> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator(color: kDeepBlue)),
+      return Scaffold(
+        backgroundColor: Colors.grey[100],
+        body: SafeArea(child: _buildSkeleton()),
       );
     }
+
+    // Kick the entry animation once data is in. forward() is a no-op if
+    // already running or completed, so this is safe to call on rebuilds.
+    _entryCtrl.forward();
 
     final profile = _profileData;
 
@@ -1234,7 +1381,11 @@ class _ProfileState extends State<Profile> {
         child: RefreshIndicator(
           color: kDeepBlue,
           onRefresh: _fetchUserProfile,
-          child: ListView(
+          child: FadeTransition(
+            opacity: _entryFade,
+            child: SlideTransition(
+              position: _entrySlide,
+              child: ListView(
             padding: const EdgeInsets.fromLTRB(18, 14, 18, 28),
             children: [
               Row(
@@ -1385,8 +1536,46 @@ class _ProfileState extends State<Profile> {
                 ),
               ),
             ],
+              ),
+            ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Small wrapper that adds a press-and-release scale feedback to a tile
+/// without taking over its tap handling. The wrapped child still owns the
+/// real `onTap` (so the InkWell ripple still shows); this widget only
+/// observes pointer down/up/cancel to drive a 96%-scale transform.
+class _PressableTile extends StatefulWidget {
+  const _PressableTile({required this.child, this.onTap});
+
+  /// Optional — kept on the API so callers can pass it through for clarity,
+  /// even though the actual tap handler lives on the inner InkWell child.
+  final VoidCallback? onTap;
+  final Widget child;
+
+  @override
+  State<_PressableTile> createState() => _PressableTileState();
+}
+
+class _PressableTileState extends State<_PressableTile> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => setState(() => _pressed = true),
+      onPointerUp: (_) => setState(() => _pressed = false),
+      onPointerCancel: (_) => setState(() => _pressed = false),
+      child: AnimatedScale(
+        scale: _pressed ? 0.96 : 1.0,
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOut,
+        child: widget.child,
       ),
     );
   }

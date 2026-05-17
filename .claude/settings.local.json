@@ -36,7 +36,23 @@
       "Bash(flutter pub *)",
       "Bash(findstr /i \"^[ ]*[└|├].*http\")",
       "PowerShell(flutter analyze lib/main.dart lib/pages/login_page.dart 2>&1)",
-      "PowerShell(flutter analyze lib/pages/login_page.dart 2>&1)"
+      "PowerShell(flutter analyze lib/pages/login_page.dart 2>&1)",
+      "PowerShell(flutter analyze 2>&1)",
+      "PowerShell(flutter analyze lib/pages/market_map_page.dart 2>&1)",
+      "PowerShell(flutter analyze lib/profile.dart 2>&1)",
+      "PowerShell(flutter analyze lib/seller_pages/dashboard_screen.dart 2>&1)",
+      "PowerShell(flutter analyze lib/pages/market_map_page.dart lib/profile.dart lib/seller_pages/dashboard_screen.dart lib/pages/productdet.dart 2>&1)",
+      "PowerShell(flutter analyze lib/pages/market_map_page.dart lib/pages/productdet.dart 2>&1)",
+      "PowerShell(flutter analyze lib/pages/market_map_page.dart lib/pages/productdet.dart lib/pages/seller_profile_page.dart 2>&1)",
+      "PowerShell(flutter analyze lib/profile.dart lib/pages/home_page.dart 2>&1)",
+      "Bash(xargs grep -l \"approval_status\\\\|approve\\\\|reject\")",
+      "Bash(sed -i '2978,3495d' lib/pages/home_page.dart)",
+      "Bash(sed -n '2975,2985p' lib/pages/home_page.dart)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Admin\\\\Downloads\\\\caps_pull\\\\admin_dashboard\" -Recurse -Directory)",
+      "Bash(Select-Object FullName)",
+      "Bash(npx --no-install nuxi typecheck)",
+      "Bash(flutter doctor *)",
+      "Bash(flutter devices *)"
     ]
   }
 }

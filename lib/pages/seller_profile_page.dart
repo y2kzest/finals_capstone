@@ -27,7 +27,8 @@ class SellerProfilePage extends StatefulWidget {
   State<SellerProfilePage> createState() => _SellerProfilePageState();
 }
 
-class _SellerProfilePageState extends State<SellerProfilePage> {
+class _SellerProfilePageState extends State<SellerProfilePage>
+    with SingleTickerProviderStateMixin {
   final _supabase = Supabase.instance.client;
 
   bool _isLoading = true;
@@ -38,10 +39,33 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
   int _reviewCount = 0;
   _StorefrontSection _activeSection = _StorefrontSection.products;
 
+  late final AnimationController _entryCtrl;
+  late final Animation<double> _entryFade;
+  late final Animation<Offset> _entrySlide;
+
   @override
   void initState() {
     super.initState();
+    _entryCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 480),
+    );
+    final curved = CurvedAnimation(
+      parent: _entryCtrl,
+      curve: Curves.easeOutCubic,
+    );
+    _entryFade = Tween<double>(begin: 0, end: 1).animate(curved);
+    _entrySlide = Tween<Offset>(
+      begin: const Offset(0, 0.04),
+      end: Offset.zero,
+    ).animate(curved);
     _loadAll();
+  }
+
+  @override
+  void dispose() {
+    _entryCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _loadAll() async {
@@ -423,7 +447,15 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
             SliverToBoxAdapter(
               child: _isLoading
                   ? _buildLoadingState(context)
-                  : Column(
+                  : Builder(
+                      builder: (context) {
+                        // Idempotent: forward() does nothing once running/done.
+                        _entryCtrl.forward();
+                        return FadeTransition(
+                          opacity: _entryFade,
+                          child: SlideTransition(
+                            position: _entrySlide,
+                            child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _buildHeroSection(
@@ -475,6 +507,10 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
                           ),
                         ),
                       ],
+                            ),
+                          ),
+                        );
+                      },
                     ),
             ),
           ],
@@ -1429,12 +1465,18 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
     final description = product['description']?.toString().trim() ?? '';
     final unit = (product['unit_type'] ?? 'unit').toString();
     final image = _productImage(product);
-    final price = _formatCurrency(product['price']);
+    final priceValue = product['price'];
+    final priceNumeric = priceValue is num
+        ? priceValue.toDouble()
+        : double.tryParse(priceValue?.toString().trim() ?? '') ?? 0.0;
+    final price = _formatCurrency(priceValue);
     final retailPriceValue = product['retail_price'];
+    final retailNumeric = retailPriceValue is num
+        ? retailPriceValue.toDouble()
+        : double.tryParse(retailPriceValue?.toString().trim() ?? '');
     final retailPrice =
-        retailPriceValue != null &&
-            retailPriceValue.toString().trim().isNotEmpty
-        ? _formatCurrency(retailPriceValue)
+        (retailNumeric != null && retailNumeric > 0 && retailNumeric > priceNumeric)
+        ? _formatCurrency(retailNumeric)
         : '';
 
     return PressableCard(
@@ -1654,73 +1696,187 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
         ),
         const SizedBox(height: 6),
         Text(
-          '$_reviewCount reviews across this seller\'s current listings.',
+          '$_reviewCount ${_reviewCount == 1 ? 'review' : 'reviews'} across this seller\'s current listings.',
           style: const TextStyle(fontSize: 13, color: MarketplaceUi.textMuted),
         ),
         const SizedBox(height: 16),
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: MarketplaceUi.panel(),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _avgRating.toStringAsFixed(1),
-                      style: const TextStyle(
-                        fontSize: 42,
-                        height: 1,
-                        fontWeight: FontWeight.w900,
-                        color: MarketplaceUi.textStrong,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: List.generate(
-                        5,
-                        (index) => Icon(
-                          index < _avgRating.round()
-                              ? Icons.star_rounded
-                              : Icons.star_outline_rounded,
-                          color: MarketplaceUi.warning,
-                          size: 18,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      'Based on $_reviewCount verified ratings',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: MarketplaceUi.textMuted,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 18),
-              Expanded(
-                flex: 2,
-                child: Column(
-                  children: [
-                    for (var star = 5; star >= 1; star--)
-                      _ratingBarRow(
-                        star: star,
-                        count: breakdown[star] ?? 0,
-                        maxCount: maxCount == 0 ? 1 : maxCount,
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final isNarrow = constraints.maxWidth < 460;
+            final summary = _ratingSummaryCard(
+              breakdown: breakdown,
+              maxCount: maxCount,
+              isNarrow: isNarrow,
+            );
+            return summary;
+          },
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 18),
+        Row(
+          children: [
+            const Text(
+              'Recent reviews',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+                color: MarketplaceUi.textStrong,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: MarketplaceUi.primary.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                '$_reviewCount',
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: MarketplaceUi.primary,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
         ..._reviews.map(_reviewCard),
       ],
+    );
+  }
+
+  Widget _ratingSummaryCard({
+    required Map<int, int> breakdown,
+    required int maxCount,
+    required bool isNarrow,
+  }) {
+    final avgText = _avgRating > 0 ? _avgRating.toStringAsFixed(1) : '0.0';
+    final ratingColumn = Column(
+      crossAxisAlignment: isNarrow
+          ? CrossAxisAlignment.center
+          : CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(
+              avgText,
+              style: const TextStyle(
+                fontSize: 46,
+                height: 1,
+                fontWeight: FontWeight.w900,
+                color: MarketplaceUi.textStrong,
+                letterSpacing: -1,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Padding(
+              padding: EdgeInsets.only(bottom: 6),
+              child: Text(
+                '/ 5',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: MarketplaceUi.textSubtle,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(5, (index) {
+            final filled = index < _avgRating.round();
+            return Padding(
+              padding: const EdgeInsets.only(right: 2),
+              child: Icon(
+                filled ? Icons.star_rounded : Icons.star_outline_rounded,
+                color: filled
+                    ? MarketplaceUi.warning
+                    : MarketplaceUi.warning.withValues(alpha: 0.35),
+                size: 22,
+              ),
+            );
+          }),
+        ),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: MarketplaceUi.warning.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            '$_reviewCount verified ${_reviewCount == 1 ? 'rating' : 'ratings'}',
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFFB45309),
+            ),
+          ),
+        ),
+      ],
+    );
+
+    final breakdownColumn = Column(
+      children: [
+        for (var star = 5; star >= 1; star--)
+          _ratingBarRow(
+            star: star,
+            count: breakdown[star] ?? 0,
+            maxCount: maxCount == 0 ? 1 : maxCount,
+          ),
+      ],
+    );
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white,
+            MarketplaceUi.primary.withValues(alpha: 0.04),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0A0F172A),
+            blurRadius: 18,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      child: isNarrow
+          ? Column(
+              children: [
+                ratingColumn,
+                const SizedBox(height: 18),
+                const Divider(height: 1, color: Color(0xFFE2E8F0)),
+                const SizedBox(height: 14),
+                breakdownColumn,
+              ],
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(child: ratingColumn),
+                const SizedBox(width: 20),
+                Container(
+                  width: 1,
+                  height: 120,
+                  color: const Color(0xFFE2E8F0),
+                ),
+                const SizedBox(width: 20),
+                Expanded(flex: 2, child: breakdownColumn),
+              ],
+            ),
     );
   }
 
@@ -1730,50 +1886,76 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
     required int maxCount,
   }) {
     final fraction = count == 0 ? 0.0 : count / maxCount;
+    final isEmpty = count == 0;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         children: [
           SizedBox(
-            width: 22,
+            width: 14,
             child: Text(
               '$star',
               style: const TextStyle(
                 fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: MarketplaceUi.textMuted,
+                fontWeight: FontWeight.w800,
+                color: MarketplaceUi.textStrong,
               ),
             ),
           ),
+          const SizedBox(width: 4),
           const Icon(
             Icons.star_rounded,
             size: 14,
             color: MarketplaceUi.warning,
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(999),
-              child: LinearProgressIndicator(
-                value: fraction,
-                minHeight: 8,
-                backgroundColor: const Color(0xFFE9EEF7),
-                valueColor: const AlwaysStoppedAnimation<Color>(
-                  MarketplaceUi.primary,
-                ),
-              ),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: fraction),
+              duration: const Duration(milliseconds: 600),
+              curve: Curves.easeOutCubic,
+              builder: (context, value, _) {
+                return ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: Stack(
+                    children: [
+                      Container(
+                        height: 10,
+                        color: const Color(0xFFEEF2F8),
+                      ),
+                      FractionallySizedBox(
+                        widthFactor: value,
+                        child: Container(
+                          height: 10,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                MarketplaceUi.warning,
+                                MarketplaceUi.warning.withValues(alpha: 0.75),
+                              ],
+                            ),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
           ),
           const SizedBox(width: 10),
           SizedBox(
-            width: 22,
+            width: 26,
             child: Text(
               '$count',
               textAlign: TextAlign.right,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: MarketplaceUi.textMuted,
+                fontWeight: FontWeight.w800,
+                color: isEmpty
+                    ? MarketplaceUi.textSubtle
+                    : MarketplaceUi.textStrong,
               ),
             ),
           ),
@@ -1803,10 +1985,22 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
         .join()
         .toUpperCase();
 
+    final hasComment = comment.isNotEmpty;
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(16),
-      decoration: MarketplaceUi.panel(),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x08000000),
+            blurRadius: 14,
+            offset: Offset(0, 6),
+          ),
+        ],
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1814,12 +2008,17 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 48,
-                height: 48,
+                width: 46,
+                height: 46,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFFDCE7FF), Color(0xFFCFE0FF)],
+                  borderRadius: BorderRadius.circular(14),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      MarketplaceUi.primary.withValues(alpha: 0.18),
+                      MarketplaceUi.accent.withValues(alpha: 0.18),
+                    ],
                   ),
                 ),
                 clipBehavior: Clip.antiAlias,
@@ -1832,7 +2031,7 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
                             initials.isEmpty ? 'B' : initials,
                             style: const TextStyle(
                               color: MarketplaceUi.primary,
-                              fontSize: 16,
+                              fontSize: 15,
                               fontWeight: FontWeight.w900,
                             ),
                           ),
@@ -1843,7 +2042,7 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
                           initials.isEmpty ? 'B' : initials,
                           style: const TextStyle(
                             color: MarketplaceUi.primary,
-                            fontSize: 16,
+                            fontSize: 15,
                             fontWeight: FontWeight.w900,
                           ),
                         ),
@@ -1854,64 +2053,44 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            reviewerName,
-                            style: const TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w800,
-                              color: MarketplaceUi.textStrong,
-                            ),
-                          ),
-                        ),
-                        if (dateText.isNotEmpty)
-                          Text(
-                            dateText,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: MarketplaceUi.textSubtle,
-                            ),
-                          ),
-                      ],
+                    Text(
+                      reviewerName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: MarketplaceUi.textStrong,
+                      ),
                     ),
                     const SizedBox(height: 4),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      crossAxisAlignment: WrapCrossAlignment.center,
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: List.generate(
-                            5,
-                            (index) => Icon(
+                        ...List.generate(
+                          5,
+                          (index) => Padding(
+                            padding: const EdgeInsets.only(right: 1),
+                            child: Icon(
                               index < rating
                                   ? Icons.star_rounded
                                   : Icons.star_outline_rounded,
-                              size: 15,
-                              color: MarketplaceUi.warning,
+                              size: 16,
+                              color: index < rating
+                                  ? MarketplaceUi.warning
+                                  : MarketplaceUi.warning.withValues(
+                                      alpha: 0.35,
+                                    ),
                             ),
                           ),
                         ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: MarketplaceUi.surface,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            productName,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: MarketplaceUi.textMuted,
-                            ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '$rating.0',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: MarketplaceUi.textMuted,
                           ),
                         ),
                       ],
@@ -1919,18 +2098,100 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
                   ],
                 ),
               ),
+              if (dateText.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    dateText,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: MarketplaceUi.textSubtle,
+                    ),
+                  ),
+                ),
             ],
           ),
           const SizedBox(height: 14),
-          Text(
-            comment.isNotEmpty
-                ? comment
-                : 'Buyer shared a star rating without a written comment.',
-            style: const TextStyle(
-              fontSize: 13,
-              height: 1.5,
-              color: MarketplaceUi.textMuted,
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            decoration: BoxDecoration(
+              color: hasComment
+                  ? MarketplaceUi.surface
+                  : const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(14),
+              border: Border(
+                left: BorderSide(
+                  color: MarketplaceUi.primary.withValues(alpha: 0.55),
+                  width: 3,
+                ),
+              ),
             ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.format_quote_rounded,
+                  size: 18,
+                  color: MarketplaceUi.primary.withValues(alpha: 0.55),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    hasComment
+                        ? comment
+                        : 'Buyer shared a star rating without a written comment.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      height: 1.55,
+                      fontStyle: hasComment ? FontStyle.normal : FontStyle.italic,
+                      color: hasComment
+                          ? MarketplaceUi.textStrong
+                          : MarketplaceUi.textSubtle,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Icon(
+                Icons.shopping_bag_outlined,
+                size: 14,
+                color: MarketplaceUi.textSubtle,
+              ),
+              const SizedBox(width: 6),
+              const Text(
+                'on ',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: MarketplaceUi.textSubtle,
+                ),
+              ),
+              Flexible(
+                child: Text(
+                  productName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: MarketplaceUi.primary,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

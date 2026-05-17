@@ -60,6 +60,9 @@ class _MarketMapPageState extends State<MarketMapPage>
   bool _isLoading = true;
   bool _showOpenOnly = false;
   bool _followMe = false;
+  // True once we've animated to the user's first GPS fix. Prevents the
+  // camera from snapping back every time the stream fires.
+  bool _hasAutoCentered = false;
 
   @override
   void initState() {
@@ -164,6 +167,7 @@ class _MarketMapPageState extends State<MarketMapPage>
             _myLocation = LatLng(last.latitude, last.longitude);
             _myAccuracyMeters = last.accuracy;
           });
+          _maybeAutoCenter();
         }
       } catch (_) {}
 
@@ -178,11 +182,27 @@ class _MarketMapPageState extends State<MarketMapPage>
           _myLocation = LatLng(pos.latitude, pos.longitude);
           _myAccuracyMeters = pos.accuracy;
         });
+        _maybeAutoCenter();
         if (_followMe) {
           _animatedMove(_myLocation!, _mapController.camera.zoom);
         }
       });
     } catch (_) {}
+  }
+
+  /// Smoothly animate to the user's first GPS fix on map load, like Google
+  /// Maps. Subsequent stream updates won't re-center (the user might have
+  /// panned away on purpose); follow-mode handles continuous tracking.
+  void _maybeAutoCenter() {
+    if (_hasAutoCentered) return;
+    final loc = _myLocation;
+    if (loc == null) return;
+    _hasAutoCentered = true;
+    // Defer one frame so the map controller has a viewport ready.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _animatedMove(loc, 18);
+    });
   }
 
   // Tween the map camera so panning to a stall (or recentering) feels
@@ -229,16 +249,32 @@ class _MarketMapPageState extends State<MarketMapPage>
     _showStallSheet(stall);
   }
 
-  void _toggleFollowMe() {
-    if (_myLocation == null) {
+  /// Three-state "my location" handler, mirroring Google Maps:
+  ///   1. Not centered → recenter (no follow).
+  ///   2. Centered but not following → enable follow mode.
+  ///   3. Following → exit follow mode.
+  void _onMyLocationPressed() {
+    final loc = _myLocation;
+    if (loc == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Waiting for your location…')),
       );
       return;
     }
-    setState(() => _followMe = !_followMe);
     if (_followMe) {
-      _animatedMove(_myLocation!, 19);
+      setState(() => _followMe = false);
+      return;
+    }
+    // Distance between current camera center and the user, in meters.
+    final cam = _mapController.camera.center;
+    final delta = distanceMeters(cam, loc);
+    // If the camera is already roughly on the user, escalate to follow mode.
+    // Otherwise just recenter.
+    if (delta < 8) {
+      setState(() => _followMe = true);
+      _animatedMove(loc, 19);
+    } else {
+      _animatedMove(loc, 19);
     }
   }
 
@@ -247,52 +283,68 @@ class _MarketMapPageState extends State<MarketMapPage>
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       builder: (ctx) {
         return SafeArea(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 22),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Center(
                   child: Container(
-                    width: 36,
+                    width: 40,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
+                      color: const Color(0xFFE5E7EB),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 18),
                 Row(
                   children: [
-                    CircleAvatar(
-                      radius: 26,
-                      backgroundColor: const Color(0xFFEEF2FF),
-                      backgroundImage: stall.logoUrl != null &&
-                              stall.logoUrl!.isNotEmpty
-                          ? NetworkImage(stall.logoUrl!)
-                          : null,
-                      child: stall.logoUrl == null || stall.logoUrl!.isEmpty
-                          ? const Icon(Icons.storefront_rounded,
-                              color: _kPrimary)
-                          : null,
+                    Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: _kPrimary.withValues(alpha: 0.18),
+                            blurRadius: 14,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
+                      ),
+                      child: CircleAvatar(
+                        radius: 30,
+                        backgroundColor: const Color(0xFFEEF2FF),
+                        backgroundImage: stall.logoUrl != null &&
+                                stall.logoUrl!.isNotEmpty
+                            ? NetworkImage(stall.logoUrl!)
+                            : null,
+                        child: stall.logoUrl == null || stall.logoUrl!.isEmpty
+                            ? const Icon(Icons.storefront_rounded,
+                                color: _kPrimary, size: 28)
+                            : null,
+                      ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 14),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
                             stall.storeName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               fontWeight: FontWeight.w800,
-                              fontSize: 17,
+                              fontSize: 18,
+                              color: Color(0xFF111827),
                             ),
                           ),
                           if (stall.stallNo.isNotEmpty)
@@ -306,38 +358,50 @@ class _MarketMapPageState extends State<MarketMapPage>
                                 ),
                               ),
                             ),
+                          const SizedBox(height: 6),
+                          _statusChip(stall.isOpen),
                         ],
                       ),
                     ),
-                    _statusChip(stall.isOpen),
                   ],
                 ),
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    const Icon(Icons.place_outlined,
-                        size: 18, color: _kPrimary),
-                    const SizedBox(width: 6),
-                    Text(
-                      '${stall.point.latitude.toStringAsFixed(5)}, ${stall.point.longitude.toStringAsFixed(5)}',
-                      style: const TextStyle(
-                          fontSize: 12, color: Color(0xFF6B7280)),
-                    ),
-                    if (dist != null) ...[
-                      const SizedBox(width: 12),
-                      const Icon(Icons.directions_walk,
+                const SizedBox(height: 18),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF7F8FC),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFE5E7EB)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.place_outlined,
                           size: 18, color: _kPrimary),
-                      const SizedBox(width: 4),
-                      Text(
-                        formatDistance(dist),
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: _kPrimary,
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '${stall.point.latitude.toStringAsFixed(5)}, ${stall.point.longitude.toStringAsFixed(5)}',
+                          style: const TextStyle(
+                              fontSize: 12, color: Color(0xFF6B7280)),
                         ),
                       ),
+                      if (dist != null) ...[
+                        const SizedBox(width: 8),
+                        const Icon(Icons.directions_walk,
+                            size: 18, color: _kPrimary),
+                        const SizedBox(width: 4),
+                        Text(
+                          formatDistance(dist),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: _kPrimary,
+                          ),
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
                 const SizedBox(height: 18),
                 Row(
@@ -617,8 +681,11 @@ class _MarketMapPageState extends State<MarketMapPage>
                                   key: ValueKey(stall.userId),
                                   point: stall.point,
                                   width: 44,
-                                  height: 50,
-                                  alignment: Alignment.topCenter,
+                                  height: 52,
+                                  // bottomCenter anchors the tail tip to the
+                                  // geo point so the icon floats above it
+                                  // — the standard map-pin behavior.
+                                  alignment: Alignment.bottomCenter,
                                   child: _buildStallMarker(stall),
                                 ),
                               if (_myLocation != null)
@@ -637,26 +704,34 @@ class _MarketMapPageState extends State<MarketMapPage>
                         bottom: 12,
                         child: Column(
                           children: [
+                            // "My location" — tap once to recenter on the
+                            // user's current GPS fix. Tap again to enable
+                            // follow mode (camera tracks GPS). Tap a third
+                            // time (or pan the map) to leave follow mode.
                             FloatingActionButton.small(
-                              heroTag: 'mapFollow',
+                              heroTag: 'mapMyLocation',
                               backgroundColor: _followMe
                                   ? _kPrimary
                                   : Colors.white,
                               foregroundColor: _followMe
                                   ? Colors.white
-                                  : _kPrimary,
-                              onPressed: _toggleFollowMe,
+                                  : (_myLocation == null
+                                      ? const Color(0xFF9CA3AF)
+                                      : _kPrimary),
                               elevation: 4,
+                              onPressed: _onMyLocationPressed,
                               child: Icon(_followMe
                                   ? Icons.my_location
-                                  : Icons.location_searching),
+                                  : Icons.near_me_rounded),
                             ),
                             const SizedBox(height: 8),
+                            // Reset to the market plaza (overview).
                             FloatingActionButton.small(
-                              heroTag: 'mapRecenter',
+                              heroTag: 'mapPlaza',
                               backgroundColor: Colors.white,
                               foregroundColor: _kPrimary,
                               elevation: 4,
+                              tooltip: 'Show market overview',
                               onPressed: () {
                                 setState(() => _followMe = false);
                                 _animatedMove(kMarketPlaza, 18);
@@ -767,16 +842,21 @@ class _MarketMapPageState extends State<MarketMapPage>
                                             Row(
                                               children: [
                                                 if (stall.stallNo.isNotEmpty)
-                                                  Padding(
-                                                    padding:
-                                                        const EdgeInsets.only(
-                                                            right: 8),
-                                                    child: Text(
-                                                      stall.stallNo,
-                                                      style: const TextStyle(
-                                                        fontSize: 12,
-                                                        color:
-                                                            Color(0xFF6B7280),
+                                                  Flexible(
+                                                    child: Padding(
+                                                      padding:
+                                                          const EdgeInsets.only(
+                                                              right: 8),
+                                                      child: Text(
+                                                        stall.stallNo,
+                                                        maxLines: 1,
+                                                        overflow:
+                                                            TextOverflow.ellipsis,
+                                                        style: const TextStyle(
+                                                          fontSize: 12,
+                                                          color:
+                                                              Color(0xFF6B7280),
+                                                        ),
                                                       ),
                                                     ),
                                                   ),

@@ -8,9 +8,12 @@ import '../services/pickup_preference_service.dart';
 import '../utils/helpers.dart';
 import '../utils/marketplace_ui.dart' show AppearOnMount, ShimmerBox, staggerDelay;
 import '../utils/page_transitions.dart';
+import 'addresses_page.dart';
 import 'cart_page.dart';
 import 'orders_page.dart';
 import 'productdet.dart';
+import 'search_page.dart';
+import 'seller_profile_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -24,9 +27,6 @@ class _HomePageState extends State<HomePage> {
   bool isLoading = true;
   String _greetingName = 'Shopper';
   String? _avatarUrl;
-  String _searchQuery = '';
-  final TextEditingController _searchController = TextEditingController();
-  final FocusNode _searchFocusNode = FocusNode();
   // Active filter chips
   bool _filterOpenNow = false;
   bool _filterDelivery = false;
@@ -34,10 +34,12 @@ class _HomePageState extends State<HomePage> {
   double _filterMaxPrice = 0; // 0 = no cap
   List<Map<String, dynamic>> _notifications = [];
   List<Map<String, dynamic>> _banners = [];
+  Map<String, dynamic>? _defaultAddress;
   late final PageController _bannerController;
   int _activeBannerIndex = 0;
   Timer? _bannerAutoplay;
   RealtimeChannel? _notifChannel;
+  RealtimeChannel? _productsChannel;
   final Set<String> _seenNotifIds = {};
 
   TimeOfDay _parsePickupTime(String time) {
@@ -73,7 +75,6 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _bannerController = PageController(viewportFraction: 0.96);
-    _searchFocusNode.addListener(_handleSearchFocusChange);
     CartBadgeService.instance.ensureInitialized();
     PickupPreferenceService.instance.ensureInitialized();
     // Warm the buyer-location cache early so opening a store map renders
@@ -85,7 +86,9 @@ class _HomePageState extends State<HomePage> {
     fetchProducts();
     _fetchNotifications();
     _fetchBanners();
+    _fetchDefaultAddress();
     _subscribeToNotifications();
+    _subscribeToProducts();
   }
 
   void _subscribeToNotifications() {
@@ -113,6 +116,21 @@ class _HomePageState extends State<HomePage> {
               setState(() => _notifications.insert(0, row));
               _showNotificationToast(row);
             }
+          },
+        )
+        ..subscribe();
+  }
+
+  void _subscribeToProducts() {
+    _productsChannel?.unsubscribe();
+    _productsChannel = Supabase.instance.client
+        .channel('public:product:featured')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'product',
+          callback: (_) {
+            if (mounted) fetchProducts();
           },
         )
         ..subscribe();
@@ -191,10 +209,6 @@ class _HomePageState extends State<HomePage> {
       );
   }
 
-  void _handleSearchFocusChange() {
-    if (mounted) setState(() {});
-  }
-
   Future<void> _ensureProfile() async {
     await ensureOwnProfileRow(Supabase.instance.client);
   }
@@ -219,10 +233,8 @@ class _HomePageState extends State<HomePage> {
   void dispose() {
     _bannerAutoplay?.cancel();
     _bannerController.dispose();
-    _searchFocusNode.removeListener(_handleSearchFocusChange);
-    _searchFocusNode.dispose();
-    _searchController.dispose();
     _notifChannel?.unsubscribe();
+    _productsChannel?.unsubscribe();
     super.dispose();
   }
 
@@ -296,13 +308,63 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _fetchBanners() async {
+  /// Pull the buyer's default delivery address so the "PICK UP" pill on
+  /// the home header can preview their real saved location instead of a
+  /// hardcoded plaza name. This is the same row checkout will use, so the
+  /// home preview and the order details stay in sync.
+  Future<void> _fetchDefaultAddress() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
     try {
-      final resp = await Supabase.instance.client
+      final res = await Supabase.instance.client
+          .from('delivery_addresses')
+          .select()
+          .eq('user_id', user.id)
+          .order('is_default', ascending: false)
+          .order('created_at', ascending: true)
+          .limit(1);
+      final list = List<Map<String, dynamic>>.from(res);
+      if (!mounted) return;
+      setState(() => _defaultAddress = list.isEmpty ? null : list.first);
+    } catch (_) {
+      // delivery_addresses table may not exist yet — leave _defaultAddress
+      // null and the pill falls back to a generic "Add address" hint.
+    }
+  }
+
+  Future<void> _fetchBanners() async {
+    final client = Supabase.instance.client;
+    const cols =
+        'user_id, store_name, banner_url, logo_url, category, opening_time, closing_time, is_open, delivery_enabled, created_at';
+
+    // Primary: only stores the admin has explicitly flagged as featured.
+    try {
+      final resp = await client
           .from('seller_profiles')
-          .select(
-            'user_id, store_name, banner_url, logo_url, category, opening_time, closing_time, is_open, delivery_enabled, created_at',
-          )
+          .select(cols)
+          .eq('approval_status', 'approved')
+          .eq('is_featured', true)
+          .not('banner_url', 'is', null)
+          .order('created_at', ascending: false)
+          .limit(10);
+      final rows = List<Map<String, dynamic>>.from(resp);
+      if (rows.isNotEmpty) {
+        if (mounted) {
+          setState(() => _banners = rows);
+          _restartBannerAutoplay();
+        }
+        return;
+      }
+    } catch (_) {
+      // `is_featured` column may not exist yet — fall through to the
+      // legacy "all approved with a banner" behavior so the carousel
+      // isn't empty until the admin has had a chance to pick.
+    }
+
+    try {
+      final resp = await client
+          .from('seller_profiles')
+          .select(cols)
           .not('banner_url', 'is', null)
           .eq('approval_status', 'approved')
           .order('created_at', ascending: false)
@@ -919,7 +981,7 @@ class _HomePageState extends State<HomePage> {
       final response = await Supabase.instance.client
           .from('product')
           .select(
-            '*, seller_profiles!product_seller_id_fkey(store_name, is_open, opening_time, closing_time, delivery_enabled, approval_status)',
+            '*, seller_profiles!product_seller_id_fkey(store_name, is_open, opening_time, closing_time, delivery_enabled, logo_url, approval_status)',
           )
           .order('id', ascending: false);
 
@@ -952,24 +1014,10 @@ class _HomePageState extends State<HomePage> {
 
   List<dynamic> _productsForFilter() {
     final List<Map<String, dynamic>> normalized = _normalizedProducts();
-
-    // Apply search query first
+    // Query-based search now lives in the dedicated SearchPage. This method
+    // is just the filter-chip pipeline for the browse layout.
     List<Map<String, dynamic>> results = normalized;
-    if (_searchQuery.isNotEmpty) {
-      final q = _searchQuery.toLowerCase();
-      results = normalized.where((p) {
-        final name = (p['product_name'] ?? '').toString().toLowerCase();
-        final store = (p['store_name'] ?? '').toString().toLowerCase();
-        final cat = (p['category'] ?? '').toString().toLowerCase();
-        final desc = (p['description'] ?? '').toString().toLowerCase();
-        return name.contains(q) ||
-            store.contains(q) ||
-            cat.contains(q) ||
-            desc.contains(q);
-      }).toList();
-    }
 
-    // Filter chips
     if (_filterOpenNow) results = results.where(_isShopOpen).toList();
     if (_filterDelivery) {
       results = results.where((p) => p['delivery_enabled'] == true).toList();
@@ -993,6 +1041,20 @@ class _HomePageState extends State<HomePage> {
     return results;
   }
 
+  void _openSellerProfile(Map<String, dynamic> store) {
+    final sellerId = store['seller_id']?.toString();
+    if (sellerId == null || sellerId.isEmpty) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SellerProfilePage(
+          sellerId: sellerId,
+          initialStoreName: store['store_name']?.toString(),
+        ),
+      ),
+    );
+  }
+
   List<Map<String, dynamic>> _normalizedProducts() {
     final List<Map<String, dynamic>> combined = [];
 
@@ -1001,6 +1063,7 @@ class _HomePageState extends State<HomePage> {
 
       // Extract joined seller_profiles data
       String storeName = 'Market Stall';
+      String sellerLogoUrl = '';
       bool sellerIsOpen = false;
       String sellerOpenTime = '05:00';
       String sellerCloseTime = '19:00';
@@ -1009,6 +1072,9 @@ class _HomePageState extends State<HomePage> {
       if (joined is Map) {
         if (joined['store_name'] != null) {
           storeName = joined['store_name'].toString();
+        }
+        if (joined['logo_url'] != null) {
+          sellerLogoUrl = joined['logo_url'].toString();
         }
         sellerIsOpen = joined['is_open'] == true;
         sellerOpenTime = joined['opening_time']?.toString() ?? '05:00';
@@ -1020,6 +1086,7 @@ class _HomePageState extends State<HomePage> {
         'product_name': (raw['name'] ?? raw['product_name'] ?? 'Fresh Item')
             .toString(),
         'store_name': storeName,
+        'store_logo_url': sellerLogoUrl,
         'price': raw['price'] ?? 0,
         'image_url':
             (raw['image_url'] != null &&
@@ -1043,6 +1110,7 @@ class _HomePageState extends State<HomePage> {
         'daily_available': raw['daily_available'] ?? true,
         'image_urls': raw['image_urls'],
         'retail_price': raw['retail_price'],
+        'is_featured': raw['is_featured'] ?? false,
       });
     }
 
@@ -1059,6 +1127,11 @@ class _HomePageState extends State<HomePage> {
     final value = product['store_name']?.toString().trim();
     if (value == null || value.isEmpty) return fallback;
     return value;
+  }
+
+  String _storeLogoUrl(dynamic product) {
+    final value = product['store_logo_url']?.toString().trim();
+    return value ?? '';
   }
 
   String _categoryLabel(dynamic product) {
@@ -1115,16 +1188,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  int _todayPickScore(dynamic product) {
-    var score = 0;
-    if (_isShopOpen(product)) score += 5;
-    if (product['delivery_enabled'] == true) score += 2;
-    final imageUrl = product['image_url']?.toString().trim() ?? '';
-    if (imageUrl.isNotEmpty) score += 1;
-    final price = double.tryParse(product['price']?.toString() ?? '') ?? 0;
-    if (price > 0 && price <= 250) score += 1;
-    return score;
-  }
 
   void _openCart() {
     Navigator.push(
@@ -1487,8 +1550,76 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Future<void> _openAddressesAndRefresh() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AddressesPage()),
+    );
+    if (mounted) _fetchDefaultAddress();
+  }
+
+  void _openSearch() {
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        opaque: true,
+        transitionDuration: const Duration(milliseconds: 280),
+        reverseTransitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (_, _, _) => const SearchPage(),
+        transitionsBuilder: (_, animation, _, child) {
+          // Subtle fade — Hero handles the visual continuity of the search
+          // pill itself, so the surrounding page just needs to settle in.
+          return FadeTransition(opacity: animation, child: child);
+        },
+      ),
+    );
+  }
+
+  Widget _buildSearchTrigger() {
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: _openSearch,
+      splashColor: const Color(0x222A4BA0),
+      highlightColor: const Color(0x112A4BA0),
+      child: Container(
+        height: 52,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x14000000),
+              blurRadius: 10,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.search_rounded,
+              color: Color(0xFF2A4BA0),
+              size: 22,
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Search products or stores',
+                style: TextStyle(
+                  color: Color(0xFF8E95A6),
+                  fontWeight: FontWeight.w500,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildTopHeader() {
-    final searchFocused = _searchFocusNode.hasFocus;
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
       decoration: BoxDecoration(
@@ -1646,97 +1777,43 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
           const SizedBox(height: 8),
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOut,
-            decoration: BoxDecoration(
-              color: searchFocused
-                  ? const Color(0x40FFFFFF)
-                  : const Color(0x2EFFFFFF),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: searchFocused
-                    ? const Color(0xB3FFFFFF)
-                    : const Color(0x42FFFFFF),
-                width: searchFocused ? 1.4 : 1,
-              ),
-              boxShadow: searchFocused
-                  ? const [
-                      BoxShadow(
-                        color: Color(0x33264FB2),
-                        blurRadius: 18,
-                        offset: Offset(0, 8),
-                      ),
-                    ]
-                  : const [],
+          // Tappable trigger that opens the dedicated SearchPage. Tapping
+          // here would previously focus a TextField inline, leaving the hero
+          // banner visible under the user's search — distracting. The new
+          // surface uses a Hero so the pill morphs into the SearchPage's
+          // sticky header for a continuous transition.
+          Hero(
+            tag: 'quickcart-search-bar',
+            flightShuttleBuilder: (_, _, _, _, _) => Material(
+              color: Colors.transparent,
+              child: _buildSearchTrigger(),
             ),
-            child: TextField(
-              controller: _searchController,
-              focusNode: _searchFocusNode,
-              onChanged: (value) {
-                setState(() => _searchQuery = value.trim());
-              },
-              decoration: InputDecoration(
-                hintText: 'Search products or store',
-                prefixIcon: const Icon(
-                  Icons.search_rounded,
-                  color: Color(0xFFF8FAFF),
-                ),
-                suffixIcon: _searchQuery.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(
-                          Icons.close,
-                          color: Color(0xFFE8EEFF),
-                          size: 20,
-                        ),
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() => _searchQuery = '');
-                        },
-                      )
-                    : const Icon(
-                        Icons.tune_rounded,
-                        color: Color(0xFFC9D6FB),
-                        size: 20,
-                      ),
-                filled: true,
-                fillColor: Colors.transparent,
-                hintStyle: const TextStyle(
-                  color: Color(0xD9F3F6FF),
-                  fontWeight: FontWeight.w500,
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 15,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide.none,
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide.none,
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w600,
-              ),
-              cursorColor: Colors.white,
+            child: Material(
+              color: Colors.transparent,
+              child: _buildSearchTrigger(),
             ),
           ),
           const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
-                child: _buildInfoPill(
-                  label: 'PICK UP',
-                  value: 'San Fernando Market Plaza',
-                  icon: Icons.location_on_outlined,
+                child: GestureDetector(
+                  onTap: _openAddressesAndRefresh,
+                  child: _buildInfoPill(
+                    label: _defaultAddress == null ? 'PICK UP' : 'DELIVER TO',
+                    value: _defaultAddress == null
+                        ? 'Pickup at seller\'s store'
+                        : (_defaultAddress!['address']?.toString().trim()
+                                .isNotEmpty ==
+                            true
+                            ? _defaultAddress!['address'].toString()
+                            : (_defaultAddress!['label']?.toString() ??
+                                'Saved address')),
+                    icon: _defaultAddress == null
+                        ? Icons.storefront_outlined
+                        : Icons.location_on_outlined,
+                    isInteractive: true,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
@@ -1747,7 +1824,7 @@ class _HomePageState extends State<HomePage> {
                     valueListenable:
                         PickupPreferenceService.instance.preferredPickup,
                     builder: (context, pickupWindow, _) => _buildInfoPill(
-                      label: 'WITHIN',
+                      label: 'PICKUP TIME',
                       value: pickupWindow,
                       icon: Icons.schedule_outlined,
                       isInteractive: true,
@@ -1859,6 +1936,7 @@ class _HomePageState extends State<HomePage> {
                       } catch (_) {}
                       final shopOpen = isOpen && isWithinHours;
 
+                      final sellerId = banner['user_id']?.toString() ?? '';
                       return AnimatedScale(
                         duration: const Duration(milliseconds: 220),
                         curve: Curves.easeOut,
@@ -1869,7 +1947,6 @@ class _HomePageState extends State<HomePage> {
                           ),
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(18),
-                            color: const Color(0xFF2A4BA0),
                             boxShadow: const [
                               BoxShadow(
                                 color: Color(0x260F172A),
@@ -1878,10 +1955,22 @@ class _HomePageState extends State<HomePage> {
                               ),
                             ],
                           ),
-                          clipBehavior: Clip.antiAlias,
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
+                          child: Material(
+                            color: const Color(0xFF2A4BA0),
+                            borderRadius: BorderRadius.circular(18),
+                            clipBehavior: Clip.antiAlias,
+                            child: InkWell(
+                              onTap: sellerId.isEmpty
+                                  ? null
+                                  : () => _openSellerProfile({
+                                        'seller_id': sellerId,
+                                        'store_name': storeName.toString(),
+                                      }),
+                              splashColor: Colors.white24,
+                              highlightColor: Colors.white10,
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
                               if (bannerUrl != null)
                                 Image.network(
                                   bannerUrl,
@@ -2079,7 +2168,9 @@ class _HomePageState extends State<HomePage> {
                                   ],
                                 ),
                               ),
-                            ],
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       );
@@ -2366,6 +2457,7 @@ class _HomePageState extends State<HomePage> {
           onAddToCart: _addToCart,
           productNameOf: (p) => _productName(p, 'Fresh Item'),
           storeNameOf: (p) => _storeName(p, 'Market Stall'),
+          storeLogoUrlOf: _storeLogoUrl,
           categoryLabelOf: _categoryLabel,
           categoryColorOf: _categoryColor,
           isShopOpenOf: _isShopOpen,
@@ -2521,30 +2613,30 @@ class _HomePageState extends State<HomePage> {
                         ],
                       ],
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 5),
                     Row(
                       children: [
-                        const Icon(
-                          Icons.store_mall_directory_outlined,
-                          size: 13,
-                          color: Color(0xFF64748B),
+                        _StoreLogoBadge(
+                          url: _storeLogoUrl(product),
+                          storeName: _storeName(product, 'Market Stall'),
+                          size: 26,
                         ),
-                        const SizedBox(width: 5),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             _storeName(product, 'Market Stall'),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              fontSize: 11,
-                              color: Color(0xFF64748B),
-                              fontWeight: FontWeight.w600,
+                              fontSize: 11.5,
+                              color: Color(0xFF475569),
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 7),
                     _buildTodayPickMetaRow(product),
                     const SizedBox(height: 8),
                     Row(
@@ -2712,16 +2804,28 @@ class _HomePageState extends State<HomePage> {
                                 ],
                               ],
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              _storeName(product, 'Market Stall'),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: storeFontSize,
-                                color: const Color(0xFF6B7280),
-                                fontWeight: FontWeight.w600,
-                              ),
+                            const SizedBox(height: 5),
+                            Row(
+                              children: [
+                                _StoreLogoBadge(
+                                  url: _storeLogoUrl(product),
+                                  storeName: _storeName(product, 'Market Stall'),
+                                  size: ultraCompactCard ? 20 : 22,
+                                ),
+                                const SizedBox(width: 7),
+                                Expanded(
+                                  child: Text(
+                                    _storeName(product, 'Market Stall'),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: storeFontSize,
+                                      color: const Color(0xFF475569),
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                             SizedBox(height: sectionGap),
                             _buildOpenClosedBadge(product),
@@ -2901,11 +3005,13 @@ class _HomePageState extends State<HomePage> {
     return path.startsWith('assets/') || path.startsWith('images/');
   }
 
+
+  // ─────────────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final filteredProducts = _productsForFilter();
-    final todayPickProducts = [...filteredProducts]
-      ..sort((a, b) => _todayPickScore(b).compareTo(_todayPickScore(a)));
+    final todayPickProducts = filteredProducts.where((p) => p['is_featured'] == true).toList();
     final visibleTodayPicks = todayPickProducts.take(6).toList();
     final recommendedProducts = filteredProducts.take(10).toList();
     final bool hasResults = filteredProducts.isNotEmpty;
@@ -2936,21 +3042,12 @@ class _HomePageState extends State<HomePage> {
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        _searchQuery.isNotEmpty
-                            ? 'No products found for "$_searchQuery"'
-                            : 'No products available yet.\nCheck back soon!',
-                        style: TextStyle(fontSize: 15, color: Colors.grey[600]),
+                        'No products available yet.\nCheck back soon!',
+                        style: TextStyle(
+                          fontSize: 15,
+                          color: Colors.grey[600],
+                        ),
                         textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 8),
-                      TextButton(
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() {
-                            _searchQuery = '';
-                          });
-                        },
-                        child: const Text('Clear filters'),
                       ),
                     ],
                   ),
@@ -2965,97 +3062,98 @@ class _HomePageState extends State<HomePage> {
                     todayPickProducts,
                   ),
                 ),
-                const SizedBox(height: 14),
-                SizedBox(
-                  height: 248,
-                  child: isLoading
-                      ? _todayPickShimmerRow()
-                      : visibleTodayPicks.isEmpty
-                      ? const Center(child: Text("No products yet."))
-                      : ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: visibleTodayPicks.length,
-                          itemBuilder: (context, index) {
-                            return AppearOnMount(
-                              delay: staggerDelay(index, step: 60),
-                              child: _buildTodayPickCard(
-                                visibleTodayPicks[index],
-                              ),
-                            );
-                          },
-                        ),
-                ),
-                const SizedBox(height: 28),
-                _buildSectionHeader(
-                  'Recommended',
-                  'Popular finds shoppers are browsing around the plaza',
-                  eyebrow: 'FOR YOU',
-                  onSeeAll: () => _openFullProductList(
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    height: 248,
+                    child: isLoading
+                        ? _todayPickShimmerRow()
+                        : visibleTodayPicks.isEmpty
+                        ? const Center(child: Text("No products yet."))
+                        : ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: visibleTodayPicks.length,
+                            itemBuilder: (context, index) {
+                              return AppearOnMount(
+                                delay: staggerDelay(index, step: 60),
+                                child: _buildTodayPickCard(
+                                  visibleTodayPicks[index],
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                  const SizedBox(height: 28),
+                  _buildSectionHeader(
                     'Recommended',
-                    filteredProducts,
+                    'Popular finds shoppers are browsing around the plaza',
+                    eyebrow: 'FOR YOU',
+                    onSeeAll: () => _openFullProductList(
+                      'Recommended',
+                      filteredProducts,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 14),
-                SizedBox(
-                  height: 308,
-                  child: isLoading
-                      ? _recommendedShimmerRow()
-                      : recommendedProducts.isEmpty
-                      ? const Center(child: Text("No products yet."))
-                      : ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: recommendedProducts.length,
-                          itemBuilder: (context, i) {
-                            final p = recommendedProducts[i];
-                            final categoryLabel = _categoryLabel(p);
-
-                            final resolvedImage =
-                                (p['image_url'] as String?)?.trim() ?? '';
-
-                            final priceValue = p['price'];
-                            final unit = (p['unit_type'] ?? 'kg').toString();
-                            final priceText = priceValue != null
-                                ? "₱$priceValue /$unit"
-                                : "₱0";
-
-                            return AppearOnMount(
-                              delay: staggerDelay(i, step: 55),
-                              child: ProductCard(
-                              title: _productName(p, 'Fresh Item'),
-                              storeName: _storeName(p, 'San Fernando Stall'),
-                              price: priceText,
-                              imageUrl: resolvedImage,
-                              description: (p['description'] ?? '').toString(),
-                              categoryLabel: categoryLabel,
-                              categoryColor: _categoryColor(categoryLabel),
-                              isShopOpen: _isShopOpen(p),
-                              shopHoursLabel: p['is_db'] == true
-                                  ? (_isShopOpen(p)
-                                        ? 'Open · Closes ${p['closing_time'] ?? '19:00'}'
-                                        : 'Closed · Opens ${p['opening_time'] ?? '05:00'}')
-                                  : null,
-                              onTap: () => _openProductDetail(p),
-                              onAddPressed: () {
-                                _addToCart(p);
-                              },
-                              ),
-                            );
-                          },
-                        ),
-                ),
-                const SizedBox(height: 28),
-                _buildSectionHeader(
-                  'Daily Essentials',
-                  'Everyday staples from trusted plaza vendors',
-                  eyebrow: 'STAPLES',
-                  onSeeAll: () => _openFullProductList(
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    height: 308,
+                    child: isLoading
+                        ? _recommendedShimmerRow()
+                        : recommendedProducts.isEmpty
+                        ? const Center(child: Text("No products yet."))
+                        : ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: recommendedProducts.length,
+                            itemBuilder: (context, i) {
+                              final p = recommendedProducts[i];
+                              final categoryLabel = _categoryLabel(p);
+                              final resolvedImage =
+                                  (p['image_url'] as String?)?.trim() ?? '';
+                              final priceValue = p['price'];
+                              final unit =
+                                  (p['unit_type'] ?? 'kg').toString();
+                              final priceText = priceValue != null
+                                  ? "₱$priceValue /$unit"
+                                  : "₱0";
+                              return AppearOnMount(
+                                delay: staggerDelay(i, step: 55),
+                                child: ProductCard(
+                                  title: _productName(p, 'Fresh Item'),
+                                  storeName: _storeName(
+                                    p,
+                                    'San Fernando Stall',
+                                  ),
+                                  storeLogoUrl: _storeLogoUrl(p),
+                                  price: priceText,
+                                  imageUrl: resolvedImage,
+                                  description:
+                                      (p['description'] ?? '').toString(),
+                                  categoryLabel: categoryLabel,
+                                  categoryColor: _categoryColor(categoryLabel),
+                                  isShopOpen: _isShopOpen(p),
+                                  shopHoursLabel: p['is_db'] == true
+                                      ? (_isShopOpen(p)
+                                            ? 'Open · Closes ${p['closing_time'] ?? '19:00'}'
+                                            : 'Closed · Opens ${p['opening_time'] ?? '05:00'}')
+                                      : null,
+                                  onTap: () => _openProductDetail(p),
+                                  onAddPressed: () => _addToCart(p),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                  const SizedBox(height: 28),
+                  _buildSectionHeader(
                     'Daily Essentials',
-                    filteredProducts,
+                    'Everyday staples from trusted plaza vendors',
+                    eyebrow: 'STAPLES',
+                    onSeeAll: () => _openFullProductList(
+                      'Daily Essentials',
+                      filteredProducts,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 14),
-                _buildEssentialsGrid(filteredProducts),
-              ],
+                  const SizedBox(height: 14),
+                  _buildEssentialsGrid(filteredProducts),
+                ],
             ],
           ),
         ),
@@ -3067,6 +3165,7 @@ class _HomePageState extends State<HomePage> {
 class ProductCard extends StatelessWidget {
   final String title;
   final String storeName;
+  final String storeLogoUrl;
   final String price;
   final String imageUrl;
   final String description;
@@ -3081,6 +3180,7 @@ class ProductCard extends StatelessWidget {
     super.key,
     required this.title,
     required this.storeName,
+    this.storeLogoUrl = '',
     required this.price,
     required this.imageUrl,
     this.description = '',
@@ -3226,16 +3326,28 @@ class ProductCard extends StatelessWidget {
                   ],
                 ],
               ),
-              const SizedBox(height: 4),
-              Text(
-                storeName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Color(0xFF6B7280),
-                  fontWeight: FontWeight.w600,
-                ),
+              const SizedBox(height: 5),
+              Row(
+                children: [
+                  _StoreLogoBadge(
+                    url: storeLogoUrl,
+                    storeName: storeName,
+                    size: 22,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      storeName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF475569),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
               ),
               if (description.trim().isNotEmpty) ...[
                 const SizedBox(height: 6),
@@ -3431,6 +3543,7 @@ class _HomeProductsListPage extends StatelessWidget {
     required this.onAddToCart,
     required this.productNameOf,
     required this.storeNameOf,
+    required this.storeLogoUrlOf,
     required this.categoryLabelOf,
     required this.categoryColorOf,
     required this.isShopOpenOf,
@@ -3442,6 +3555,7 @@ class _HomeProductsListPage extends StatelessWidget {
   final void Function(dynamic product) onAddToCart;
   final String Function(dynamic product) productNameOf;
   final String Function(dynamic product) storeNameOf;
+  final String Function(dynamic product) storeLogoUrlOf;
   final String Function(dynamic product) categoryLabelOf;
   final Color? Function(String label) categoryColorOf;
   final bool Function(dynamic product) isShopOpenOf;
@@ -3558,18 +3672,30 @@ class _HomeProductsListPage extends StatelessWidget {
                                     ],
                                   ],
                                 ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  storeNameOf(product),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Color(0xFF6B7280),
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                                const SizedBox(height: 5),
+                                Row(
+                                  children: [
+                                    _StoreLogoBadge(
+                                      url: storeLogoUrlOf(product),
+                                      storeName: storeNameOf(product),
+                                      size: 22,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        storeNameOf(product),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Color(0xFF475569),
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(height: 6),
+                                const SizedBox(height: 7),
                                 Container(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 8,
@@ -3698,6 +3824,93 @@ class _ProductThumb extends StatelessWidget {
 }
 
 /// Pill chip showing whether a shop supports delivery or is pickup-only.
+/// Small rounded-square that shows the seller's actual logo on a product
+/// card's store row. Falls back to a colored initial bubble (deterministic
+/// per store name) instead of a generic icon, so cards stay visually
+/// distinguishable even when the seller hasn't uploaded a logo.
+class _StoreLogoBadge extends StatelessWidget {
+  const _StoreLogoBadge({
+    required this.url,
+    required this.storeName,
+    this.size = 20,
+  });
+
+  final String url;
+  final String storeName;
+  final double size;
+
+  static const List<(Color, Color)> _palette = [
+    (Color(0xFF2A4BA0), Color(0xFF153075)),
+    (Color(0xFFEC4899), Color(0xFFBE185D)),
+    (Color(0xFF10B981), Color(0xFF047857)),
+    (Color(0xFFF59E0B), Color(0xFFB45309)),
+    (Color(0xFF8B5CF6), Color(0xFF5B21B6)),
+    (Color(0xFF06B6D4), Color(0xFF0E7490)),
+    (Color(0xFFEF4444), Color(0xFFB91C1C)),
+    (Color(0xFF14B8A6), Color(0xFF0F766E)),
+  ];
+
+  (Color, Color) _colorsFor(String name) {
+    if (name.isEmpty) return _palette.first;
+    var hash = 0;
+    for (final code in name.codeUnits) {
+      hash = (hash * 31 + code) & 0x7fffffff;
+    }
+    return _palette[hash % _palette.length];
+  }
+
+  String _initial(String name) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return '?';
+    return trimmed.characters.first.toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final (bg, fg) = _colorsFor(storeName);
+    final fallback = Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [bg, fg],
+        ),
+        borderRadius: BorderRadius.circular(size * 0.32),
+      ),
+      child: Text(
+        _initial(storeName),
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w900,
+          fontSize: size * 0.52,
+          height: 1,
+        ),
+      ),
+    );
+
+    if (url.isEmpty) return fallback;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(size * 0.32),
+        border: Border.all(color: const Color(0xFFE0E7FF)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Image.network(
+        url,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => fallback,
+        loadingBuilder: (context, child, progress) =>
+            progress == null ? child : fallback,
+      ),
+    );
+  }
+}
+
 class _FulfillmentChip extends StatelessWidget {
   const _FulfillmentChip({required this.deliveryEnabled});
 

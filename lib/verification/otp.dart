@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -21,6 +23,13 @@ class _OtpVerificationPageState extends State<OtpVerificationPage> {
   final supabase = Supabase.instance.client;
   final TextEditingController _otpController = TextEditingController();
   bool _isLoading = false;
+  bool _isResending = false;
+
+  // Cooldown so a successful resend disables the button for a beat —
+  // matches Supabase's own server-side rate limit and keeps the user from
+  // burning through OTP requests on a slow network.
+  int _resendSeconds = 0;
+  Timer? _resendTimer;
 
   static const Color kPrimaryBlue = Color(0xFF2A4BA0);
   static const Color kButtonBlue = Color(0xFF153075);
@@ -30,7 +39,68 @@ class _OtpVerificationPageState extends State<OtpVerificationPage> {
   @override
   void dispose() {
     _otpController.dispose();
+    _resendTimer?.cancel();
     super.dispose();
+  }
+
+  void _startResendCooldown([int seconds = 45]) {
+    _resendTimer?.cancel();
+    if (!mounted) return;
+    setState(() => _resendSeconds = seconds);
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() {
+        _resendSeconds = _resendSeconds - 1;
+        if (_resendSeconds <= 0) {
+          _resendSeconds = 0;
+          timer.cancel();
+        }
+      });
+    });
+  }
+
+  Future<void> _resendOtp() async {
+    if (_isResending || _resendSeconds > 0) return;
+    setState(() => _isResending = true);
+    try {
+      if (_isEmailContact) {
+        await supabase.auth.resend(
+          type: OtpType.signup,
+          email: widget.contact,
+        );
+      } else {
+        await supabase.auth.resend(
+          type: OtpType.sms,
+          phone: widget.contact,
+        );
+      }
+      if (!mounted) return;
+      _showSnackBar('A new code was sent to ${widget.contact}.');
+      _startResendCooldown();
+    } on AuthException catch (e) {
+      // Supabase returns the remaining seconds in the message body when the
+      // server-side rate limit kicks in (e.g. "For security purposes, you
+      // can only request this after 28 seconds."). Parse it so the cooldown
+      // shows the real value instead of our default 45s guess.
+      final message = e.message;
+      final match = RegExp(r'(\d+)\s*seconds').firstMatch(message);
+      if (match != null) {
+        final remaining = int.tryParse(match.group(1) ?? '') ?? 45;
+        _startResendCooldown(remaining);
+        _showSnackBar(
+          'Please wait $remaining seconds before requesting another code.',
+        );
+      } else {
+        _showSnackBar('Resend failed: $message');
+      }
+    } catch (e) {
+      _showSnackBar('Could not resend code: $e');
+    } finally {
+      if (mounted) setState(() => _isResending = false);
+    }
   }
 
   void _showSnackBar(String message) {
@@ -231,17 +301,29 @@ class _OtpVerificationPageState extends State<OtpVerificationPage> {
                       ),
                       const SizedBox(height: 12),
                       TextButton(
-                        onPressed: () {
-                          // TODO: Implement resend logic (call signInWithOtp again)
-                          _showSnackBar("Resend feature not yet implemented.");
-                        },
-                        child: const Text(
-                          "Resend Code",
-                          style: TextStyle(
-                            color: kPrimaryBlue,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
+                        onPressed: (_isResending || _resendSeconds > 0)
+                            ? null
+                            : _resendOtp,
+                        child: _isResending
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: kPrimaryBlue,
+                                ),
+                              )
+                            : Text(
+                                _resendSeconds > 0
+                                    ? 'Resend code in ${_resendSeconds}s'
+                                    : 'Resend Code',
+                                style: TextStyle(
+                                  color: _resendSeconds > 0
+                                      ? Colors.grey
+                                      : kPrimaryBlue,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                       ),
                     ],
                   ),
