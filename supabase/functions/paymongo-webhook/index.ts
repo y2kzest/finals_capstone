@@ -204,6 +204,67 @@ Deno.serve(async (req) => {
       return text('ok', 200);
     }
 
+    if (eventType === 'checkout_session.payment.paid') {
+      // Maya (and any future Checkout-Sessions-only methods) flow through here.
+      // The order row stores the checkout session id in `paymongo_source_id`
+      // (reusing the same column — it's just a string id from PayMongo).
+      const csId = String(resource.id ?? '');
+      if (!csId) return text('bad checkout session payload', 400);
+
+      const { data: orders, error: ordErr } = await admin
+        .from('orders')
+        .select(
+          'id, buyer_id, seller_id, product_name, qty, total_amount, order_type, payment_status',
+        )
+        .eq('paymongo_source_id', csId);
+      if (ordErr) return text(`db error: ${ordErr.message}`, 500);
+      if (!orders || orders.length === 0) {
+        return text('no orders for checkout session (ack)', 200);
+      }
+      if (orders.every((o) => o.payment_status === 'paid')) {
+        return text('already paid (ack)', 200);
+      }
+
+      // Checkout Session payloads include the underlying payment(s)
+      const paymentId =
+        String(resource.attributes?.payments?.[0]?.id ?? '') || null;
+
+      await admin
+        .from('orders')
+        .update({
+          payment_status: 'paid',
+          paymongo_payment_id: paymentId,
+          paid_at: new Date().toISOString(),
+        })
+        .eq('paymongo_source_id', csId);
+
+      for (const o of orders) {
+        const qty = Number(o.qty ?? 1);
+        const total = Number(o.total_amount ?? 0);
+        const itemLine =
+          `${o.product_name ?? 'Item'} x${qty} - P${total.toFixed(0)}` +
+          (o.order_type === 'delivery' ? ' (Delivery)' : '');
+        if (o.seller_id) {
+          await admin.from('seller_notifications').insert({
+            seller_id: o.seller_id,
+            order_id: o.id,
+            title: 'New Order!',
+            body: itemLine,
+            type: 'new_order',
+          });
+        }
+        await admin.from('notifications').insert({
+          user_id: o.buyer_id,
+          type: 'payment_received',
+          title: 'Payment received',
+          message: `Your online payment for ${o.product_name ?? 'your order'} was confirmed.`,
+          is_read: false,
+        });
+      }
+
+      return text('ok', 200);
+    }
+
     if (eventType === 'source.failed' || eventType === 'source.expired') {
       const sourceId = String(resource.id ?? '');
       if (!sourceId) return text('bad source payload', 400);

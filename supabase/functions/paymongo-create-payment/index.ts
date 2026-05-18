@@ -136,36 +136,75 @@ Deno.serve(async (req) => {
     );
   }
 
-  // Create a PayMongo Source
-  let sourceRes: Response;
+  // PayMongo removed Maya from the legacy /v1/sources endpoint — Maya is now
+  // only available via Checkout Sessions. GCash and GrabPay still work via
+  // Sources. Route per-method.
+  const normalizedMethod = normalizeMethod(method);
+  const useCheckoutSession = normalizedMethod === 'paymaya';
+
+  let pmRes: Response;
   try {
-    sourceRes = await fetch(`${PAYMONGO_BASE}/sources`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${btoa(`${PAYMONGO_SK}:`)}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        data: {
-          attributes: {
-            amount: amountCentavos,
-            currency: 'PHP',
-            type: normalizeMethod(method),
-            redirect: { success: successUrl, failed: failedUrl },
-            billing: {
-              name,
-              ...(email ? { email } : {}),
+    if (useCheckoutSession) {
+      pmRes = await fetch(`${PAYMONGO_BASE}/checkout_sessions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${btoa(`${PAYMONGO_SK}:`)}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          data: {
+            attributes: {
+              send_email_receipt: false,
+              show_description: false,
+              show_line_items: false,
+              line_items: [
+                {
+                  name: 'QuickCart order',
+                  amount: amountCentavos,
+                  currency: 'PHP',
+                  quantity: 1,
+                },
+              ],
+              payment_method_types: [normalizedMethod],
+              success_url: successUrl,
+              cancel_url: failedUrl,
+              billing: {
+                name,
+                ...(email ? { email } : {}),
+              },
             },
           },
+        }),
+      });
+    } else {
+      pmRes = await fetch(`${PAYMONGO_BASE}/sources`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${btoa(`${PAYMONGO_SK}:`)}`,
+          'Content-Type': 'application/json',
         },
-      }),
-    });
+        body: JSON.stringify({
+          data: {
+            attributes: {
+              amount: amountCentavos,
+              currency: 'PHP',
+              type: normalizedMethod,
+              redirect: { success: successUrl, failed: failedUrl },
+              billing: {
+                name,
+                ...(email ? { email } : {}),
+              },
+            },
+          },
+        }),
+      });
+    }
   } catch (e) {
     return json({ error: `paymongo network error: ${e}` }, 502);
   }
 
-  const sourceBody = await sourceRes.text();
-  if (!sourceRes.ok) {
+  const sourceBody = await pmRes.text();
+  if (!pmRes.ok) {
     return json(
       { error: 'paymongo source creation failed', detail: sourceBody },
       502,
@@ -180,7 +219,11 @@ Deno.serve(async (req) => {
   }
 
   const sourceId = sourceJson?.data?.id as string | undefined;
-  const checkoutUrl = sourceJson?.data?.attributes?.redirect?.checkout_url as
+  // Sources put the URL under `redirect.checkout_url`; checkout sessions put
+  // it directly on `attributes.checkout_url`.
+  const checkoutUrl = (useCheckoutSession
+    ? sourceJson?.data?.attributes?.checkout_url
+    : sourceJson?.data?.attributes?.redirect?.checkout_url) as
     | string
     | undefined;
   const sourceStatus = sourceJson?.data?.attributes?.status as
