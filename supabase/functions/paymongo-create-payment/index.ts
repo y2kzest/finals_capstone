@@ -19,14 +19,15 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const PAYMONGO_BASE = 'https://api.paymongo.com/v1';
-// PayMongo renamed the PayMaya source_type to "maya" — the old value
-// "paymaya" now returns parameter_invalid. Keep both in the allow-list so
-// older app clients still work, but always send "maya" to PayMongo.
+// PayMongo's Sources API source_type for Maya is "paymaya" even after the
+// consumer rebrand to "Maya" — sending "maya" returns parameter_invalid.
+// Accept both client-side values for forward-compat; always send "paymaya"
+// to PayMongo.
 const ALLOWED_METHODS = ['gcash', 'maya', 'paymaya', 'grab_pay'] as const;
 type WalletMethod = (typeof ALLOWED_METHODS)[number];
 
 function normalizeMethod(method: WalletMethod): string {
-  return method === 'paymaya' ? 'maya' : method;
+  return method === 'maya' ? 'paymaya' : method;
 }
 
 const corsHeaders = {
