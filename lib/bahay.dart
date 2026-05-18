@@ -9,6 +9,7 @@ import 'pages/buyer_messages_page.dart';
 import 'pages/login_page.dart';
 import 'pages/orders_page.dart';
 import 'services/paymongo_service.dart';
+import 'utils/buyer_notification_overlay.dart';
 
 class Bahay extends StatelessWidget {
   const Bahay({super.key});
@@ -197,7 +198,7 @@ class _MainNavigationState extends State<MainNavigation> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return BuyerNotificationOverlay(child: Scaffold(
       extendBody: true,
       body: Stack(
         children: [
@@ -340,7 +341,7 @@ class _MainNavigationState extends State<MainNavigation> {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 

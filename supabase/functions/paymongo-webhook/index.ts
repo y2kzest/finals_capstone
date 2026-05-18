@@ -181,22 +181,31 @@ Deno.serve(async (req) => {
         const qty = Number(o.qty ?? 1);
         const total = Number(o.total_amount ?? 0);
         const itemLine =
-          `${o.product_name ?? 'Item'} x${qty} - P${total.toFixed(0)}` +
+          `${o.product_name ?? 'Item'} x${qty} — ₱${total.toFixed(0)}` +
           (o.order_type === 'delivery' ? ' (Delivery)' : '');
         if (o.seller_id) {
           await admin.from('seller_notifications').insert({
             seller_id: o.seller_id,
             order_id: o.id,
-            title: 'New Order!',
+            title: 'New Order — GCash Paid!',
             body: itemLine,
             type: 'new_order',
+          });
+          // Separate payment-receipt notification so the seller can see it
+          // in the notification panel alongside the order notification.
+          await admin.from('seller_notifications').insert({
+            seller_id: o.seller_id,
+            order_id: o.id,
+            title: 'Payment Received',
+            body: `GCash payment of ₱${total.toFixed(2)} confirmed for ${o.product_name ?? 'your order'}.`,
+            type: 'payment_received',
           });
         }
         await admin.from('notifications').insert({
           user_id: o.buyer_id,
           type: 'payment_received',
-          title: 'Payment received',
-          message: `Your online payment for ${o.product_name ?? 'your order'} was confirmed.`,
+          title: 'GCash Payment Confirmed',
+          message: `Your GCash payment of ₱${total.toFixed(2)} for ${o.product_name ?? 'your order'} was received.`,
           is_read: false,
         });
       }
@@ -242,22 +251,31 @@ Deno.serve(async (req) => {
         const qty = Number(o.qty ?? 1);
         const total = Number(o.total_amount ?? 0);
         const itemLine =
-          `${o.product_name ?? 'Item'} x${qty} - P${total.toFixed(0)}` +
+          `${o.product_name ?? 'Item'} x${qty} — ₱${total.toFixed(0)}` +
           (o.order_type === 'delivery' ? ' (Delivery)' : '');
         if (o.seller_id) {
           await admin.from('seller_notifications').insert({
             seller_id: o.seller_id,
             order_id: o.id,
-            title: 'New Order!',
+            title: 'New Order — Maya Paid!',
             body: itemLine,
             type: 'new_order',
+          });
+          // Separate payment-receipt notification so the seller can see it
+          // in the notification panel alongside the order notification.
+          await admin.from('seller_notifications').insert({
+            seller_id: o.seller_id,
+            order_id: o.id,
+            title: 'Payment Received',
+            body: `Maya payment of ₱${total.toFixed(2)} confirmed for ${o.product_name ?? 'your order'}.`,
+            type: 'payment_received',
           });
         }
         await admin.from('notifications').insert({
           user_id: o.buyer_id,
           type: 'payment_received',
-          title: 'Payment received',
-          message: `Your online payment for ${o.product_name ?? 'your order'} was confirmed.`,
+          title: 'Maya Payment Confirmed',
+          message: `Your Maya payment of ₱${total.toFixed(2)} for ${o.product_name ?? 'your order'} was received.`,
           is_read: false,
         });
       }

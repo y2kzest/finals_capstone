@@ -24,6 +24,7 @@ class _AddProductPageState extends State<AddProductPage> {
   final TextEditingController stockCtrl = TextEditingController();
   final TextEditingController descriptionCtrl = TextEditingController();
   List<ProductVariant> _variants = [];
+  bool _variantsHaveErrors = false;
   final TextEditingController prepTimeCtrl = TextEditingController();
 
   String selectedCategory = "Fish";
@@ -92,6 +93,17 @@ class _AddProductPageState extends State<AddProductPage> {
         (!isKarinderya && stockCtrl.text.isEmpty)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please fill all required fields.")),
+      );
+      return;
+    }
+
+    if (_variantsHaveErrors) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Each variant needs a price. Fix or remove incomplete options before publishing.',
+          ),
+        ),
       );
       return;
     }
@@ -346,13 +358,15 @@ class _AddProductPageState extends State<AddProductPage> {
                     VariantBuilderField(
                       initialVariants: _variants,
                       onChanged: (v) => setState(() => _variants = v),
+                      onValidationChanged: (hasErrors) =>
+                          setState(() => _variantsHaveErrors = hasErrors),
                     ),
                     const SizedBox(height: 32),
 
                     SizedBox(
                       width: double.infinity, height: 54,
                       child: ElevatedButton(
-                        onPressed: _isSaving ? null : saveProduct,
+                        onPressed: (_isSaving || _variantsHaveErrors) ? null : saveProduct,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: _kPrimary,
                           foregroundColor: Colors.white,

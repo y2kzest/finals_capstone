@@ -114,7 +114,6 @@ class _HomePageState extends State<HomePage> {
             _seenNotifIds.add(id);
             if (mounted) {
               setState(() => _notifications.insert(0, row));
-              _showNotificationToast(row);
             }
           },
         )
@@ -134,79 +133,6 @@ class _HomePageState extends State<HomePage> {
           },
         )
         ..subscribe();
-  }
-
-  void _showNotificationToast(Map<String, dynamic> n) {
-    if (!mounted) return;
-    final title = (n['title']?.toString().trim().isNotEmpty == true)
-        ? n['title'].toString()
-        : _notifTitle(n['type']?.toString() ?? '');
-    final message = n['message']?.toString() ?? '';
-    final accent = _notifColor(n['type']?.toString() ?? '');
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 4),
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: const Color(0xFF111827),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
-          content: Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(
-                  _notifIcon(n['type']?.toString() ?? ''),
-                  color: accent,
-                  size: 18,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 13.5,
-                        color: Colors.white,
-                      ),
-                    ),
-                    if (message.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        message,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFFE5E7EB),
-                          height: 1.35,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-          action: SnackBarAction(
-            label: 'View',
-            textColor: Colors.white,
-            onPressed: () => _handleNotificationTap(n),
-          ),
-        ),
-      );
   }
 
   Future<void> _ensureProfile() async {

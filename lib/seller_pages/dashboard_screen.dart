@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/seller_approval_notifications.dart';
+import '../utils/seller_notification_overlay.dart';
 import '../bahay.dart';
 import 'addproduct.dart';
 import 'inventory.dart';
@@ -44,6 +45,7 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen>
   double _deliveryFee = 0;
   String _openingTime = '05:00';
   String _closingTime = '19:00';
+  RealtimeChannel? _ordersChannel;
 
   late final AnimationController _entryCtrl;
   late final Animation<double> _entryFade;
@@ -65,10 +67,33 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen>
     ).animate(curved);
     _fetchSellerData();
     _syncApprovalStatus();
+    _subscribeToOrders();
+  }
+
+  void _subscribeToOrders() {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+    _ordersChannel = Supabase.instance.client
+        .channel('dashboard_orders_$userId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'orders',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'seller_id',
+            value: userId,
+          ),
+          callback: (_) {
+            if (mounted) _fetchSellerData();
+          },
+        )
+        .subscribe();
   }
 
   @override
   void dispose() {
+    _ordersChannel?.unsubscribe();
     _entryCtrl.dispose();
     super.dispose();
   }
@@ -365,20 +390,22 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen>
   // ── Build ─────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: kSurface,
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: [
-          _buildHomeTab(),
-          const OrdersPage(),
-          InventoryManagementScreen(onBack: () => _goToTab(0)),
-          const AnalyticsReportScreen(),
-        ],
-      ),
-      bottomNavigationBar: _ModernNavBar(
-        currentIndex: _selectedIndex,
-        onTap: _goToTab,
+    return SellerNotificationOverlay(
+      child: Scaffold(
+        backgroundColor: kSurface,
+        body: IndexedStack(
+          index: _selectedIndex,
+          children: [
+            _buildHomeTab(),
+            const OrdersPage(),
+            InventoryManagementScreen(onBack: () => _goToTab(0)),
+            const AnalyticsReportScreen(),
+          ],
+        ),
+        bottomNavigationBar: _ModernNavBar(
+          currentIndex: _selectedIndex,
+          onTap: _goToTab,
+        ),
       ),
     );
   }

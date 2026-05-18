@@ -26,6 +26,7 @@ class _EditProductPageState extends State<EditProductPage> {
   late final TextEditingController stockCtrl;
   late final TextEditingController descriptionCtrl;
   List<ProductVariant> _variants = [];
+  bool _variantsHaveErrors = false;
   late final TextEditingController prepTimeCtrl;
 
   late String selectedCategory;
@@ -165,6 +166,17 @@ class _EditProductPageState extends State<EditProductPage> {
     if (nameCtrl.text.trim().isEmpty || priceCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please fill all required fields.')),
+      );
+      return;
+    }
+
+    if (_variantsHaveErrors) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Each variant needs a price. Fix or remove incomplete options before saving.',
+          ),
+        ),
       );
       return;
     }
@@ -477,6 +489,8 @@ class _EditProductPageState extends State<EditProductPage> {
                     VariantBuilderField(
                       initialVariants: _variants,
                       onChanged: (v) => setState(() => _variants = v),
+                      onValidationChanged: (hasErrors) =>
+                          setState(() => _variantsHaveErrors = hasErrors),
                     ),
                     const SizedBox(height: 32),
 
@@ -484,7 +498,7 @@ class _EditProductPageState extends State<EditProductPage> {
                       width: double.infinity,
                       height: 54,
                       child: ElevatedButton(
-                        onPressed: _isSaving ? null : _saveChanges,
+                        onPressed: (_isSaving || _variantsHaveErrors) ? null : _saveChanges,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: _kPrimary,
                           foregroundColor: Colors.white,

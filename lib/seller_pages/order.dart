@@ -787,6 +787,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     final shortId = orderId.length > 8 ? orderId.substring(0, 8) : orderId;
     final imgUrl = o['image_url']?.toString().trim() ?? '';
     final declinedReason = o['declined_reason']?.toString();
+    final selectedVariant = o['selected_variant']?.toString();
     final orderType = o['order_type']?.toString() ?? 'pickup';
     final deliveryAddress = o['delivery_address']?.toString() ?? '';
     final isDelivery = orderType == 'delivery';
@@ -838,6 +839,24 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                         style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
                         maxLines: 1, overflow: TextOverflow.ellipsis,
                       ),
+                      if (selectedVariant != null && selectedVariant.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: _kPrimary.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            selectedVariant,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: _kPrimary,
+                            ),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 4),
                       Row(
                         children: [

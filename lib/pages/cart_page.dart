@@ -566,6 +566,8 @@ class _CartPageState extends State<CartPage> {
           'payment_status': initialPaymentStatus,
           if ((item['selected_variant'] as String?)?.isNotEmpty == true)
             'selected_variant': item['selected_variant'],
+          if ((item['buyer_note'] as String?)?.isNotEmpty == true)
+            'buyer_notes': item['buyer_note'],
           if (itemDeliveryAddress != null && itemDeliveryAddress.isNotEmpty)
             'delivery_address': itemDeliveryAddress,
           if (itemDeliveryLat != null) 'delivery_lat': itemDeliveryLat,
@@ -2140,10 +2142,11 @@ class _CartPageState extends State<CartPage> {
     final unit = (item['unit_type'] ?? 'kg').toString();
     final imgUrl = _image(item);
     final subtotal = price * qty;
+    // Cart quantities are always whole numbers — to sell partial weights,
+    // sellers add variants like "Half kg" / "1 kg" with their own prices.
     const step = 1.0;
     const minQty = 1.0;
-    String fmtQty(double v) =>
-        v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
+    String fmtQty(double v) => v.toStringAsFixed(0);
 
     return Dismissible(
       key: ValueKey(item['id']),

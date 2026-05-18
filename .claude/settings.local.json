@@ -52,7 +52,8 @@
       "Bash(Select-Object FullName)",
       "Bash(npx --no-install nuxi typecheck)",
       "Bash(flutter doctor *)",
-      "Bash(flutter devices *)"
+      "Bash(flutter devices *)",
+      "Bash(dart analyze *)"
     ]
   }
 }

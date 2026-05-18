@@ -11,6 +11,7 @@ class CartBadgeService {
   final ValueNotifier<int> count = ValueNotifier<int>(0);
 
   StreamSubscription<AuthState>? _authSubscription;
+  RealtimeChannel? _cartChannel;
   String? _activeUserId;
   bool _initialized = false;
 
@@ -20,6 +21,7 @@ class CartBadgeService {
     if (_initialized) {
       if (_activeUserId != currentUserId) {
         _activeUserId = currentUserId;
+        _resubscribe(currentUserId);
         refreshCount();
       }
       return;
@@ -27,13 +29,41 @@ class CartBadgeService {
 
     _initialized = true;
     _activeUserId = currentUserId;
+
     _authSubscription ??= Supabase.instance.client.auth.onAuthStateChange.listen(
-        (data) {
-          _activeUserId = data.session?.user.id;
-          refreshCount();
-        },
-      );
+      (data) {
+        final newId = data.session?.user.id;
+        if (newId != _activeUserId) {
+          _activeUserId = newId;
+          _resubscribe(newId);
+        }
+        refreshCount();
+      },
+    );
+
+    _resubscribe(currentUserId);
     refreshCount();
+  }
+
+  void _resubscribe(String? userId) {
+    _cartChannel?.unsubscribe();
+    _cartChannel = null;
+    if (userId == null) return;
+
+    _cartChannel = Supabase.instance.client
+        .channel('cart_badge_$userId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'cart',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'buyer_id',
+            value: userId,
+          ),
+          callback: (_) => refreshCount(),
+        )
+        .subscribe();
   }
 
   Future<void> refreshCount() async {

@@ -108,18 +108,28 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     );
     if (confirmed != true) { reasonCtrl.dispose(); return; }
     try {
-      await supabase.from('orders').update({
+      final rows = await supabase.from('orders').update({
         'status': 'cancelled',
         'cancelled_by': 'buyer',
         'cancel_reason': reasonCtrl.text.trim().isEmpty ? null : reasonCtrl.text.trim(),
         'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', orderId);
-      if (mounted) {
-        setState(() => _isLoading = true);
-        _fetchOrders();
+      }).eq('id', orderId).select();
+      if (!mounted) return;
+      if ((rows as List).isEmpty) {
+        // RLS blocked the update — order was already accepted/completed
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Order cancelled.')));
+          const SnackBar(
+            content: Text('Could not cancel. The order may have already been processed by the seller.'),
+            backgroundColor: Color(0xFFDC2626),
+          ),
+        );
+        _fetchOrders();
+        return;
       }
+      setState(() => _isLoading = true);
+      _fetchOrders();
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Order cancelled.')));
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
@@ -566,6 +576,8 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     final shortId = orderId.length > 8 ? orderId.substring(0, 8) : orderId;
     final imgUrl = order['image_url']?.toString().trim() ?? '';
     final declinedReason = order['declined_reason']?.toString();
+    final selectedVariant = order['selected_variant']?.toString();
+    final buyerNotes = order['notes']?.toString();
     final storeLat = (order['store_lat'] as num?)?.toDouble();
     final storeLng = (order['store_lng'] as num?)?.toDouble();
     final deliveryLat = (order['delivery_lat'] as num?)?.toDouble();
@@ -615,6 +627,40 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                         style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
                         maxLines: 1, overflow: TextOverflow.ellipsis,
                       ),
+                      if (selectedVariant != null && selectedVariant.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF2A4BA0).withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            selectedVariant,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF2A4BA0),
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (buyerNotes != null && buyerNotes.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(Icons.edit_note_rounded, size: 12, color: Color(0xFF9CA3AF)),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                buyerNotes,
+                                style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280), fontStyle: FontStyle.italic),
+                                maxLines: 1, overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                       const SizedBox(height: 3),
                       Row(
                         children: [

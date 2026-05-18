@@ -83,22 +83,20 @@ class _ProductOptionsSheetState extends State<_ProductOptionsSheet> {
   double get _displayPrice => _selectedVariant?.price ?? _basePrice;
 
   // ── unit / qty helpers ────────────────────────────────────────────────────
+  //
+  // Quantities are whole-number only. Partial weights (e.g. "Half kg") must
+  // be modeled as seller-defined variants with their own price — this keeps
+  // the cart math unambiguous and matches how ecommerce stores actually sell.
 
   String get _unitType {
     final u = widget.product['unit_type']?.toString().trim() ?? '';
     return u.isNotEmpty ? u : 'kg';
   }
 
-  bool get _isWeightUnit {
-    const w = ['kg', 'g', 'gram', 'grams', 'lb', 'lbs', 'kilogram', 'kilograms'];
-    return w.contains(_unitType.toLowerCase());
-  }
+  static const double _qtyStep = 1.0;
+  static const double _qtyMin = 1.0;
 
-  double get _qtyStep => _isWeightUnit ? 0.5 : 1.0;
-  double get _qtyMin => _isWeightUnit ? 0.5 : 1.0;
-
-  String _fmtQty(double v) =>
-      v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
+  String _fmtQty(double v) => v.toStringAsFixed(0);
 
   String _fmtPrice(double v) =>
       v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2);

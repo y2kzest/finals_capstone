@@ -565,28 +565,20 @@ class _ProductViewPageState extends State<ProductViewPage> {
     return 'KG';
   }
 
-  bool get _isWeightUnit {
-    final u = _unitType.toLowerCase();
-    return u == 'kg' || u == 'g' || u == 'gram' || u == 'grams' ||
-        u == 'lb' || u == 'lbs' || u == 'kilogram' || u == 'kilograms';
-  }
-
-  double get _qtyStep => _isWeightUnit ? 0.5 : 1.0;
-  double get _qtyMin => _isWeightUnit ? 0.5 : 1.0;
+  // Quantities are whole-number only. To sell a partial weight (e.g. half a
+  // kilo of siling labuyo) the seller adds a variant like "Half kg — ₱300"
+  // — variants carry their own price, which is unambiguous at checkout.
+  static const double _qtyStep = 1.0;
+  static const double _qtyMin = 1.0;
 
   /// Clamp a quantity coming from any external source (cart edit, options
-  /// sheet, DB) so the displayed value can never be negative or fall below
-  /// the unit-specific minimum. Defends against corrupt cart rows or stale
-  /// data that would otherwise render as "-0.5" or "0".
+  /// sheet, DB) so the displayed value can never fall below 1.
   double _clampQty(double q) {
     if (q.isNaN || q < _qtyMin) return _qtyMin;
     return q;
   }
 
-  String _formatQty(double qty) {
-    if (qty == qty.truncateToDouble()) return qty.toStringAsFixed(0);
-    return qty.toStringAsFixed(1);
-  }
+  String _formatQty(double qty) => qty.toStringAsFixed(0);
 
   String _formatPrice(double value) {
     if (value == value.truncateToDouble()) {
@@ -661,10 +653,22 @@ class _ProductViewPageState extends State<ProductViewPage> {
     }
 
     try {
-      // Only deduplicate when no variant is selected (different variants are
-      // distinct line-items).
+      // Deduplicate: merge into an existing cart row when the same product
+      // AND the same variant (or no variant) is already in the cart.
       Map<String, dynamic>? existing;
-      if (selectedVariant == null) {
+      if (selectedVariant != null && selectedVariant.isNotEmpty) {
+        // Variant selected — match on product + seller + variant name.
+        if (productId != null && productId.isNotEmpty) {
+          existing = await supabase
+              .from('cart')
+              .select('id, qty')
+              .eq('buyer_id', user.id)
+              .eq('product_id', productId)
+              .eq('selected_variant', selectedVariant)
+              .maybeSingle();
+        }
+      } else {
+        // No variant — match on product + seller only.
         if (productId != null && productId.isNotEmpty) {
           var query = supabase
               .from('cart')
