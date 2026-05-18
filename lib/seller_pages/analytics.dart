@@ -34,11 +34,39 @@ class _AnalyticsReportScreenState extends State<AnalyticsReportScreen> {
   List<MapEntry<String, double>> _revenueChartData = [];
 
   final supabase = Supabase.instance.client;
+  RealtimeChannel? _ordersChannel;
 
   @override
   void initState() {
     super.initState();
     _loadAnalytics();
+    _subscribeRealtime();
+  }
+
+  void _subscribeRealtime() {
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) return;
+    _ordersChannel = supabase
+        .channel('analytics-orders-$userId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'orders',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'seller_id',
+            value: userId,
+          ),
+          callback: (_) { if (mounted) _loadAnalytics(); },
+        )
+        .subscribe();
+  }
+
+  @override
+  void dispose() {
+    _ordersChannel?.unsubscribe();
+    if (_ordersChannel != null) supabase.removeChannel(_ordersChannel!);
+    super.dispose();
   }
 
   DateTime _periodStart() {

@@ -78,6 +78,7 @@ class _SellerNotificationOverlayState extends State<SellerNotificationOverlay>
     _progressTimer?.cancel();
     _cardCtrl.dispose();
     _iconCtrl.dispose();
+    _channel?.unsubscribe();
     if (_channel != null) Supabase.instance.client.removeChannel(_channel!);
     super.dispose();
   }
@@ -228,24 +229,34 @@ class _SellerNotifCard extends StatelessWidget {
   final VoidCallback onDismiss;
   final VoidCallback onViewOrders;
 
-  static const _kBlue  = Color(0xFF2A4BA0);
-  static const _kBlueL = Color(0xFF4F7FE8);
-  static const _kGreen  = Color(0xFF059669);
-  static const _kGreenL = Color(0xFF10B981);
+  static Color _accent(String type) {
+    switch (type) {
+      case 'payment_received': return const Color(0xFF059669);
+      case 'low_stock':        return const Color(0xFFD97706);
+      case 'out_of_stock':     return const Color(0xFFDC2626);
+      default:                 return const Color(0xFF2A4BA0);
+    }
+  }
 
-  static Color _accent(String type) =>
-      type == 'payment_received' ? _kGreen : _kBlue;
+  static Color _accentLight(String type) {
+    switch (type) {
+      case 'payment_received': return const Color(0xFF10B981);
+      case 'low_stock':        return const Color(0xFFF59E0B);
+      case 'out_of_stock':     return const Color(0xFFEF4444);
+      default:                 return const Color(0xFF4F7FE8);
+    }
+  }
 
-  static Color _accentLight(String type) =>
-      type == 'payment_received' ? _kGreenL : _kBlueL;
+  static IconData _icon(String type) {
+    switch (type) {
+      case 'payment_received': return Icons.payments_rounded;
+      case 'low_stock':        return Icons.inventory_2_rounded;
+      case 'out_of_stock':     return Icons.remove_shopping_cart_rounded;
+      default:                 return Icons.shopping_bag_rounded;
+    }
+  }
 
-  static IconData _icon(String type) =>
-      type == 'payment_received'
-          ? Icons.payments_rounded
-          : Icons.shopping_bag_rounded;
-
-  static bool _hasAction(String type) =>
-      type == 'new_order' || type == 'payment_received';
+  static bool _hasAction(String type) => true;
 
   String _extractPaymentBadge(String title) {
     final lower = title.toLowerCase();

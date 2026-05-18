@@ -46,6 +46,7 @@ class _SellerMessagesPageState extends State<SellerMessagesPage> {
     _searchController.removeListener(_handleSearchChange);
     _searchController.dispose();
     _pollTimer?.cancel();
+    _channel?.unsubscribe();
     if (_channel != null) {
       _supabase.removeChannel(_channel!);
     }
@@ -61,6 +62,7 @@ class _SellerMessagesPageState extends State<SellerMessagesPage> {
 
   void _subscribeRealtime() {
     if (_myId == null) return;
+    _channel?.unsubscribe();
     if (_channel != null) {
       _supabase.removeChannel(_channel!);
     }

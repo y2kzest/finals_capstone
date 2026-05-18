@@ -82,6 +82,7 @@ class _MarketMapPageState extends State<MarketMapPage>
     _posSub?.cancel();
     _moveCtrl?.dispose();
     _pulseCtrl.dispose();
+    _stallsChannel?.unsubscribe();
     if (_stallsChannel != null) {
       _supabase.removeChannel(_stallsChannel!);
     }

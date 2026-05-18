@@ -31,6 +31,8 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen>
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   late TabController _tabController;
+  RealtimeChannel? _productChannel;
+  RealtimeChannel? _logChannel;
 
   // Today's sales stats
   int _soldTodayCount = 0;
@@ -69,10 +71,50 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen>
     _searchController.addListener(() {
       setState(() => _searchQuery = _searchController.text.toLowerCase());
     });
+    _subscribeRealtime();
+  }
+
+  void _subscribeRealtime() {
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) return;
+
+    _productChannel = supabase
+        .channel('inventory-products-$userId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'product',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: userId,
+          ),
+          callback: (_) { if (mounted) _loadProducts(); },
+        )
+        .subscribe();
+
+    _logChannel = supabase
+        .channel('inventory-log-$userId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'inventory_log',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: userId,
+          ),
+          callback: (_) { if (mounted) _loadSalesLog(); },
+        )
+        .subscribe();
   }
 
   @override
   void dispose() {
+    _productChannel?.unsubscribe();
+    if (_productChannel != null) supabase.removeChannel(_productChannel!);
+    _logChannel?.unsubscribe();
+    if (_logChannel != null) supabase.removeChannel(_logChannel!);
     _searchController.dispose();
     _tabController.dispose();
     super.dispose();

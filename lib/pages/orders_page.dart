@@ -37,6 +37,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
   @override
   void dispose() {
     _tabController.dispose();
+    _ordersChannel?.unsubscribe();
     if (_ordersChannel != null) {
       supabase.removeChannel(_ordersChannel!);
     }

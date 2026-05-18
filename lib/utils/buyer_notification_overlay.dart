@@ -78,6 +78,7 @@ class _BuyerNotificationOverlayState extends State<BuyerNotificationOverlay>
     _progressTimer?.cancel();
     _cardCtrl.dispose();
     _iconCtrl.dispose();
+    _channel?.unsubscribe();
     if (_channel != null) Supabase.instance.client.removeChannel(_channel!);
     super.dispose();
   }

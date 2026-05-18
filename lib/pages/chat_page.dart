@@ -70,6 +70,7 @@ class _ChatPageState extends State<ChatPage> {
     _msgCtrl.removeListener(_handleDraftChange);
     _msgCtrl.dispose();
     _scrollCtrl.dispose();
+    _channel?.unsubscribe();
     if (_channel != null) {
       _supabase.removeChannel(_channel!);
     }
@@ -150,6 +151,7 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _subscribeRealtime() {
+    _channel?.unsubscribe();
     if (_channel != null) {
       _supabase.removeChannel(_channel!);
     }

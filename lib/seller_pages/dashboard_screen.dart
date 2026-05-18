@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/seller_approval_notifications.dart';
@@ -141,7 +143,10 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _SellerNotifPanel(notifications: notifs),
+      builder: (_) => _SellerNotifPanel(
+        notifications: notifs,
+        userId: userId,
+      ),
     );
   }
 
@@ -1647,9 +1652,60 @@ class _BellButton extends StatelessWidget {
 
 // ── Notification panel (bottom sheet) ────────────────────────────────────────
 
-class _SellerNotifPanel extends StatelessWidget {
-  const _SellerNotifPanel({required this.notifications});
+class _SellerNotifPanel extends StatefulWidget {
+  const _SellerNotifPanel({
+    required this.notifications,
+    required this.userId,
+  });
   final List<Map<String, dynamic>> notifications;
+  final String userId;
+
+  @override
+  State<_SellerNotifPanel> createState() => _SellerNotifPanelState();
+}
+
+class _SellerNotifPanelState extends State<_SellerNotifPanel> {
+  late List<Map<String, dynamic>> _notifs;
+  RealtimeChannel? _channel;
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    _notifs = List<Map<String, dynamic>>.from(widget.notifications);
+    _subscribeRealtime();
+    _ticker = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _subscribeRealtime() {
+    _channel = Supabase.instance.client
+        .channel('seller_notif_panel_${widget.userId}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'seller_notifications',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'seller_id',
+            value: widget.userId,
+          ),
+          callback: (payload) {
+            if (!mounted) return;
+            setState(() => _notifs.insert(0, payload.newRecord));
+          },
+        )
+        .subscribe();
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    _channel?.unsubscribe();
+    Supabase.instance.client.removeChannel(_channel!);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1690,7 +1746,7 @@ class _SellerNotifPanel extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
-                if (notifications.isNotEmpty)
+                if (_notifs.isNotEmpty)
                   Container(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 9, vertical: 4),
@@ -1699,7 +1755,7 @@ class _SellerNotifPanel extends StatelessWidget {
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(
-                      '${notifications.length}',
+                      '${_notifs.length}',
                       style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
@@ -1730,7 +1786,7 @@ class _SellerNotifPanel extends StatelessWidget {
           const Divider(height: 1, color: Color(0xFFF1F5F9)),
           // List
           Flexible(
-            child: notifications.isEmpty
+            child: _notifs.isEmpty
                 ? const Padding(
                     padding: EdgeInsets.symmetric(vertical: 48),
                     child: Column(
@@ -1764,14 +1820,14 @@ class _SellerNotifPanel extends StatelessWidget {
                 : ListView.separated(
                     shrinkWrap: true,
                     padding: const EdgeInsets.symmetric(vertical: 8),
-                    itemCount: notifications.length,
+                    itemCount: _notifs.length,
                     separatorBuilder: (_, _) => const Divider(
                       height: 1,
                       indent: 72,
                       color: Color(0xFFF8FAFC),
                     ),
                     itemBuilder: (_, i) =>
-                        _SellerNotifItem(notif: notifications[i]),
+                        _SellerNotifItem(notif: _notifs[i]),
                   ),
           ),
           SizedBox(height: MediaQuery.of(context).padding.bottom + 8),
@@ -1806,13 +1862,30 @@ class _SellerNotifItem extends StatelessWidget {
     final isRead = notif['is_read'] == true;
     final timeLabel = _timeAgo(notif['created_at']?.toString());
 
-    final isPayment = type == 'payment_received';
-    final accent = isPayment ? const Color(0xFF059669) : kPrimary;
-    final accentLight =
-        isPayment ? const Color(0xFF10B981) : const Color(0xFF4F7FE8);
-    final icon = isPayment
-        ? Icons.payments_rounded
-        : Icons.shopping_bag_rounded;
+    final Color accent;
+    final Color accentLight;
+    final IconData icon;
+    switch (type) {
+      case 'payment_received':
+        accent = const Color(0xFF059669);
+        accentLight = const Color(0xFF10B981);
+        icon = Icons.payments_rounded;
+        break;
+      case 'low_stock':
+        accent = const Color(0xFFD97706);
+        accentLight = const Color(0xFFF59E0B);
+        icon = Icons.inventory_2_rounded;
+        break;
+      case 'out_of_stock':
+        accent = const Color(0xFFDC2626);
+        accentLight = const Color(0xFFEF4444);
+        icon = Icons.remove_shopping_cart_rounded;
+        break;
+      default:
+        accent = kPrimary;
+        accentLight = const Color(0xFF4F7FE8);
+        icon = Icons.shopping_bag_rounded;
+    }
 
     return Container(
       color: isRead
