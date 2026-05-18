@@ -303,6 +303,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
             'type': type,
             'title': title,
             'message': message,
+            'order_id': orderId,
             'is_read': false,
           });
         }
@@ -382,6 +383,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
             'type': 'order_declined',
             'title': 'Order Declined',
             'message': '$productName was declined${reason.isNotEmpty ? ': $reason' : '.'}',
+            'order_id': orderId,
             'is_read': false,
           });
         }

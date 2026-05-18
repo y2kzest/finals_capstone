@@ -46,6 +46,8 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen>
   String _openingTime = '05:00';
   String _closingTime = '19:00';
   RealtimeChannel? _ordersChannel;
+  RealtimeChannel? _notifsChannel;
+  int _unreadNotifCount = 0;
 
   late final AnimationController _entryCtrl;
   late final Animation<double> _entryFade;
@@ -68,6 +70,79 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen>
     _fetchSellerData();
     _syncApprovalStatus();
     _subscribeToOrders();
+    _fetchNotifCount();
+    _subscribeToNotifCount();
+  }
+
+  Future<void> _fetchNotifCount() async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+    try {
+      final data = await Supabase.instance.client
+          .from('seller_notifications')
+          .select('id')
+          .eq('seller_id', userId)
+          .eq('is_read', false);
+      if (mounted) setState(() => _unreadNotifCount = (data as List).length);
+    } catch (_) {}
+  }
+
+  void _subscribeToNotifCount() {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+    _notifsChannel = Supabase.instance.client
+        .channel('dashboard_seller_notifs_$userId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'seller_notifications',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'seller_id',
+            value: userId,
+          ),
+          callback: (_) {
+            if (mounted) setState(() => _unreadNotifCount++);
+          },
+        )
+        .subscribe();
+  }
+
+  Future<void> _openNotificationPanel() async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+
+    List<Map<String, dynamic>> notifs = [];
+    try {
+      final data = await Supabase.instance.client
+          .from('seller_notifications')
+          .select()
+          .eq('seller_id', userId)
+          .order('created_at', ascending: false)
+          .limit(50);
+      notifs = List<Map<String, dynamic>>.from(data);
+    } catch (_) {}
+
+    // Mark all unread as read
+    if (notifs.any((n) => n['is_read'] == false)) {
+      try {
+        await Supabase.instance.client
+            .from('seller_notifications')
+            .update({'is_read': true})
+            .eq('seller_id', userId)
+            .eq('is_read', false);
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+    setState(() => _unreadNotifCount = 0);
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _SellerNotifPanel(notifications: notifs),
+    );
   }
 
   void _subscribeToOrders() {
@@ -94,6 +169,7 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen>
   @override
   void dispose() {
     _ordersChannel?.unsubscribe();
+    _notifsChannel?.unsubscribe();
     _entryCtrl.dispose();
     super.dispose();
   }
@@ -638,6 +714,11 @@ class _ShopDashboardScreenState extends State<ShopDashboardScreen>
             ],
           ),
         ),
+        _BellButton(
+          count: _unreadNotifCount,
+          onTap: _openNotificationPanel,
+        ),
+        const SizedBox(width: 8),
         _CircleAction(
           icon: Icons.arrow_back_rounded,
           onTap: _goBackToHome,
@@ -1493,4 +1574,337 @@ class _QuickAction {
       required this.color,
       required this.onTap,
       this.badge});
+}
+
+// ── Bell button with unread badge ─────────────────────────────────────────────
+
+class _BellButton extends StatelessWidget {
+  const _BellButton({required this.count, required this.onTap});
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: count > 0
+                  ? kPrimary.withValues(alpha: 0.08)
+                  : kCard,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Icon(
+              count > 0
+                  ? Icons.notifications_rounded
+                  : Icons.notifications_outlined,
+              size: 20,
+              color: count > 0 ? kPrimary : kTextSecondary,
+            ),
+          ),
+          if (count > 0)
+            Positioned(
+              top: -4,
+              right: -4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDC2626),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white, width: 1.5),
+                ),
+                constraints:
+                    const BoxConstraints(minWidth: 18, minHeight: 18),
+                child: Text(
+                  count > 99 ? '99+' : '$count',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w800,
+                    height: 1.0,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Notification panel (bottom sheet) ────────────────────────────────────────
+
+class _SellerNotifPanel extends StatelessWidget {
+  const _SellerNotifPanel({required this.notifications});
+  final List<Map<String, dynamic>> notifications;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.76,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Handle
+          Center(
+            child: Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE2E8F0),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          // Header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 16, 12),
+            child: Row(
+              children: [
+                const Text(
+                  'Notifications',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF0F172A),
+                  ),
+                ),
+                const Spacer(),
+                if (notifications.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 9, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: kPrimary.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '${notifications.length}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: kPrimary,
+                      ),
+                    ),
+                  ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.close_rounded,
+                      size: 16,
+                      color: Color(0xFF64748B),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1, color: Color(0xFFF1F5F9)),
+          // List
+          Flexible(
+            child: notifications.isEmpty
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 48),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.notifications_off_rounded,
+                          size: 52,
+                          color: Color(0xFFCBD5E1),
+                        ),
+                        SizedBox(height: 12),
+                        Text(
+                          'No notifications yet',
+                          style: TextStyle(
+                            color: Color(0xFF94A3B8),
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'New orders and payments will appear here.',
+                          style: TextStyle(
+                            color: Color(0xFFCBD5E1),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.separated(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    itemCount: notifications.length,
+                    separatorBuilder: (_, _) => const Divider(
+                      height: 1,
+                      indent: 72,
+                      color: Color(0xFFF8FAFC),
+                    ),
+                    itemBuilder: (_, i) =>
+                        _SellerNotifItem(notif: notifications[i]),
+                  ),
+          ),
+          SizedBox(height: MediaQuery.of(context).padding.bottom + 8),
+        ],
+      ),
+    );
+  }
+}
+
+class _SellerNotifItem extends StatelessWidget {
+  const _SellerNotifItem({required this.notif});
+  final Map<String, dynamic> notif;
+
+  static String _timeAgo(String? iso) {
+    if (iso == null) return '';
+    try {
+      final diff = DateTime.now().difference(DateTime.parse(iso).toLocal());
+      if (diff.inSeconds < 60) return 'Just now';
+      if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+      if (diff.inHours < 24) return '${diff.inHours}h ago';
+      return '${diff.inDays}d ago';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final type = notif['type']?.toString() ?? 'new_order';
+    final title = notif['title']?.toString() ?? '';
+    final body = notif['body']?.toString() ?? '';
+    final isRead = notif['is_read'] == true;
+    final timeLabel = _timeAgo(notif['created_at']?.toString());
+
+    final isPayment = type == 'payment_received';
+    final accent = isPayment ? const Color(0xFF059669) : kPrimary;
+    final accentLight =
+        isPayment ? const Color(0xFF10B981) : const Color(0xFF4F7FE8);
+    final icon = isPayment
+        ? Icons.payments_rounded
+        : Icons.shopping_bag_rounded;
+
+    return Container(
+      color: isRead
+          ? Colors.transparent
+          : kPrimary.withValues(alpha: 0.03),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [accent, accentLight],
+                ),
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: [
+                  BoxShadow(
+                    color: accent.withValues(alpha: 0.28),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: Icon(icon, color: Colors.white, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: isRead
+                                ? FontWeight.w600
+                                : FontWeight.w800,
+                            color: const Color(0xFF0F172A),
+                            height: 1.2,
+                          ),
+                        ),
+                      ),
+                      if (!isRead)
+                        Container(
+                          width: 8,
+                          height: 8,
+                          margin: const EdgeInsets.only(left: 6, top: 2),
+                          decoration: const BoxDecoration(
+                            color: kPrimary,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                    ],
+                  ),
+                  if (body.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      body,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF64748B),
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                  if (timeLabel.isNotEmpty) ...[
+                    const SizedBox(height: 5),
+                    Text(
+                      timeLabel,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF94A3B8),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

@@ -32,6 +32,8 @@ class _ProductViewPageState extends State<ProductViewPage> {
   ];
 
   double _quantity = 1.0;
+  double? _selectedVariantPrice;
+  String? _selectedVariantName;
   bool _showReviews = false;
   bool _inWishlist = false;
   String? _sellerLogoUrl;
@@ -596,7 +598,11 @@ class _ProductViewPageState extends State<ProductViewPage> {
       showBuyNow: false,
     );
     if (result == null) return;
-    setState(() => _quantity = _clampQty(result.qty));
+    setState(() {
+      _quantity = _clampQty(result.qty);
+      _selectedVariantPrice = result.effectivePrice;
+      _selectedVariantName = result.selectedVariant?.name;
+    });
     await _addToCart(
       selectedVariant: result.selectedVariant?.name,
       note: result.note,
@@ -615,7 +621,11 @@ class _ProductViewPageState extends State<ProductViewPage> {
       showBuyNow: true,
     );
     if (result == null) return;
-    setState(() => _quantity = _clampQty(result.qty));
+    setState(() {
+      _quantity = _clampQty(result.qty);
+      _selectedVariantPrice = result.effectivePrice;
+      _selectedVariantName = result.selectedVariant?.name;
+    });
     await _buyNow(
       selectedVariant: result.selectedVariant?.name,
       initialNote: result.note,
@@ -912,6 +922,15 @@ class _ProductViewPageState extends State<ProductViewPage> {
               '$_displayName x${_formatQty(_quantity)} \u2014 \u20b1${total.toStringAsFixed(0)}'
               '${orderType == 'delivery' ? ' (Delivery)' : ''}',
           'type': 'new_order',
+        });
+        // Notify buyer that COD order was placed successfully.
+        await supabase.from('notifications').insert({
+          'user_id': buyerId,
+          'type': 'order_placed',
+          'title': 'Order Placed!',
+          'message': '$_displayName has been sent to the seller. Waiting for confirmation.',
+          'order_id': orderId,
+          'is_read': false,
         });
       }
 
@@ -2002,7 +2021,8 @@ class _ProductViewPageState extends State<ProductViewPage> {
 
   @override
   Widget build(BuildContext context) {
-    final double total = _priceValue * _quantity;
+    final double effectiveUnitPrice = _selectedVariantPrice ?? _priceValue;
+    final double total = effectiveUnitPrice * _quantity;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF2F3F7),
@@ -2174,13 +2194,24 @@ class _ProductViewPageState extends State<ProductViewPage> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    '₱${_formatPrice(_priceValue)}/$_unitType',
+                                    '₱${_formatPrice(effectiveUnitPrice)}/$_unitType',
                                     style: const TextStyle(
                                       fontSize: 24,
                                       color: Color(0xFF1A3C8C),
                                       fontWeight: FontWeight.w800,
                                     ),
                                   ),
+                                  if (_selectedVariantName != null) ...[
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'Option: $_selectedVariantName',
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Color(0xFF6B7280),
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
                                   if (_hasDiscount)
                                     Text(
                                       '₱${_formatPrice(_retailPriceValue)}',

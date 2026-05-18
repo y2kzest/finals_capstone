@@ -206,6 +206,7 @@ Deno.serve(async (req) => {
           type: 'payment_received',
           title: 'GCash Payment Confirmed',
           message: `Your GCash payment of ₱${total.toFixed(2)} for ${o.product_name ?? 'your order'} was received.`,
+          order_id: o.id,
           is_read: false,
         });
       }
@@ -276,6 +277,7 @@ Deno.serve(async (req) => {
           type: 'payment_received',
           title: 'Maya Payment Confirmed',
           message: `Your Maya payment of ₱${total.toFixed(2)} for ${o.product_name ?? 'your order'} was received.`,
+          order_id: o.id,
           is_read: false,
         });
       }

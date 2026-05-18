@@ -228,6 +228,19 @@ class _ProductOptionsSheetState extends State<_ProductOptionsSheet> {
                   color: _kPrimary,
                 ),
               ),
+              if (_selectedVariant != null) ...[
+                const SizedBox(height: 3),
+                Text(
+                  _selectedVariant!.price != null
+                      ? 'Option: ${_selectedVariant!.name}'
+                      : 'Option: ${_selectedVariant!.name} · base price applies',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF6B7280),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ],
           ),
         ),

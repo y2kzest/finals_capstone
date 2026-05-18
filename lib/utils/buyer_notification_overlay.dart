@@ -220,6 +220,7 @@ Color _buyerAccent(String type) {
     case 'order_declined':         return const Color(0xFFDC2626);
     case 'order_placed':           return const Color(0xFF2A4BA0);
     case 'order_pending_payment':  return const Color(0xFFD97706);
+    case 'payment_received':       return const Color(0xFF059669);
     default:                       return const Color(0xFF2A4BA0);
   }
 }
@@ -233,6 +234,7 @@ Color _buyerAccentLight(String type) {
     case 'order_declined':         return const Color(0xFFEF4444);
     case 'order_placed':           return const Color(0xFF4F7FE8);
     case 'order_pending_payment':  return const Color(0xFFF59E0B);
+    case 'payment_received':       return const Color(0xFF10B981);
     default:                       return const Color(0xFF4F7FE8);
   }
 }
@@ -246,6 +248,7 @@ IconData _buyerIcon(String type) {
     case 'order_declined':         return Icons.cancel_rounded;
     case 'order_placed':           return Icons.shopping_bag_rounded;
     case 'order_pending_payment':  return Icons.schedule_rounded;
+    case 'payment_received':       return Icons.payments_rounded;
     default:                       return Icons.notifications_rounded;
   }
 }
@@ -258,6 +261,7 @@ bool _buyerHasAction(String type) {
     case 'order_completed':
     case 'order_declined':
     case 'order_placed':
+    case 'payment_received':
       return true;
     default:
       return false;
