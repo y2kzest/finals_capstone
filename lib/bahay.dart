@@ -60,6 +60,19 @@ class _MainNavigationState extends State<MainNavigation> {
         );
       }
       if (!mounted) return;
+
+      // Clear the buyer's cart. On native, cart_page does this itself after
+      // the WebView resolves — but on web the cart_page route was destroyed
+      // when the browser navigated away, so we have to do it here.
+      final user = _supabase.auth.currentUser;
+      if (user != null) {
+        try {
+          await _supabase.from('cart').delete().eq('buyer_id', user.id);
+        } catch (_) {
+          // Non-fatal — buyer can clear manually if needed.
+        }
+      }
+      if (!mounted) return;
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
