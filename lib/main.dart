@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'bahay.dart';
 import 'pages/login_page.dart';
+import 'services/paymongo_service.dart';
 import 'utils/marketplace_ui.dart';
 
 const String kSupabaseUrl = 'https://mnnnmdlvjvwyxhadeinc.supabase.co';
@@ -22,6 +23,14 @@ Future<void> main() async {
   // PKCE exchange. No-op on mobile.
   if (kIsWeb) {
     usePathUrlStrategy();
+
+    // PayMongo redirects back to `<origin>/?paymongo=success|failed` after a
+    // wallet payment. Capture that flag here so the first authenticated screen
+    // (bahay.dart) can react. Cleared as soon as it's consumed.
+    final flag = Uri.base.queryParameters['paymongo'];
+    if (flag == 'success' || flag == 'failed') {
+      PaymongoService.pendingWebReturn = flag;
+    }
   }
 
   String envUrl = kSupabaseUrl;

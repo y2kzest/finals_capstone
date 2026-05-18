@@ -90,6 +90,18 @@ class _PaymongoWebViewPageState extends State<PaymongoWebViewPage> {
 
   Future<void> _openBrowser() async {
     final uri = Uri.parse(widget.checkoutUrl);
+    if (kIsWeb) {
+      // Web: navigate the current tab to PayMongo. A new-tab popup would be
+      // blocked by mobile browsers (no user-gesture chain through initState)
+      // and breaks the round-trip back into the app. PayMongo will redirect
+      // to PaymongoService.successUrl / failedUrl — both point at this app's
+      // origin with a `?paymongo=` flag that bahay.dart reads on return.
+      if (widget.pollOrderId != null) {
+        await PaymongoService.instance.stashPendingOrder(widget.pollOrderId!);
+      }
+      await launchUrl(uri, webOnlyWindowName: '_self');
+      return;
+    }
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }

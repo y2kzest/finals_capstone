@@ -7,6 +7,8 @@ import 'pages/home_page.dart';
 import 'pages/category_page.dart';
 import 'pages/buyer_messages_page.dart';
 import 'pages/login_page.dart';
+import 'pages/orders_page.dart';
+import 'services/paymongo_service.dart';
 
 class Bahay extends StatelessWidget {
   const Bahay({super.key});
@@ -32,6 +34,82 @@ class _MainNavigationState extends State<MainNavigation> {
   void initState() {
     super.initState();
     _checkSuspensionStatus();
+    _handlePaymongoWebReturn();
+  }
+
+  /// On Flutter web, PayMongo redirects the user back to this app's origin
+  /// with `?paymongo=success|failed`. main.dart captures the flag at startup;
+  /// this method consumes it once we have a Scaffold to show feedback in.
+  /// On native, [PaymongoService.pendingWebReturn] is always null — no-op.
+  Future<void> _handlePaymongoWebReturn() async {
+    final flag = PaymongoService.pendingWebReturn;
+    if (flag == null) return;
+    PaymongoService.pendingWebReturn = null;
+
+    final orderId = await PaymongoService.instance.takePendingOrder();
+    if (!mounted) return;
+
+    if (flag == 'success') {
+      // Webhook may take a moment to flip payment_status to 'paid'. Poll
+      // briefly so the dialog wording matches reality.
+      String status = 'pending';
+      if (orderId != null) {
+        status = await PaymongoService.instance.waitForPaymentResult(
+          orderId,
+          timeout: const Duration(seconds: 15),
+        );
+      }
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          icon: Icon(
+            status == 'paid'
+                ? Icons.check_circle_rounded
+                : Icons.schedule_rounded,
+            color: status == 'paid'
+                ? const Color(0xFF10B981)
+                : const Color(0xFF2A4BA0),
+            size: 56,
+          ),
+          title: Text(
+            status == 'paid' ? 'Payment received!' : 'Payment processing',
+          ),
+          content: Text(
+            status == 'paid'
+                ? 'Your order is confirmed. View it in Orders.'
+                : 'We received your payment and are confirming with the '
+                      'bank. Check Orders in a moment.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Continue shopping'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const OrdersPage()),
+                );
+              },
+              child: const Text('View Orders'),
+            ),
+          ],
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Payment was cancelled or declined. Your orders are saved — '
+            'try again from Orders.',
+          ),
+          backgroundColor: Color(0xFFDC2626),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   Future<void> _checkSuspensionStatus() async {
