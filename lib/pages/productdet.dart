@@ -914,24 +914,31 @@ class _ProductViewPageState extends State<ProductViewPage> {
       // Notify seller \u2014 only for COD orders. Online orders are notified by the
       // PayMongo webhook after payment confirms.
       if (!isOnline && sellerId != null && sellerId.isNotEmpty) {
-        await supabase.from('seller_notifications').insert({
-          'seller_id': sellerId,
-          'order_id': orderRes['id'],
-          'title': 'New Order!',
-          'body':
-              '$_displayName x${_formatQty(_quantity)} \u2014 \u20b1${total.toStringAsFixed(0)}'
-              '${orderType == 'delivery' ? ' (Delivery)' : ''}',
-          'type': 'new_order',
-        });
-        // Notify buyer that COD order was placed successfully.
-        await supabase.from('notifications').insert({
-          'user_id': buyerId,
-          'type': 'order_placed',
-          'title': 'Order Placed!',
-          'message': '$_displayName has been sent to the seller. Waiting for confirmation.',
-          'order_id': orderId,
-          'is_read': false,
-        });
+        try {
+          await supabase.from('seller_notifications').insert({
+            'seller_id': sellerId,
+            'order_id': orderRes['id'],
+            'title': 'New Order!',
+            'body':
+                '$_displayName x${_formatQty(_quantity)} \u2014 \u20b1${total.toStringAsFixed(0)}'
+                '${orderType == 'delivery' ? ' (Delivery)' : ''}',
+            'type': 'new_order',
+          });
+        } catch (e) {
+          debugPrint('Seller notification insert failed: $e');
+        }
+        try {
+          await supabase.from('notifications').insert({
+            'user_id': buyerId,
+            'type': 'order_placed',
+            'title': 'Order Placed!',
+            'message': '$_displayName has been sent to the seller. Waiting for confirmation.',
+            'order_id': orderId,
+            'is_read': false,
+          });
+        } catch (e) {
+          debugPrint('Buyer notification insert failed: $e');
+        }
       }
 
       // COD path \u2014 show success and return
@@ -1079,7 +1086,8 @@ class _ProductViewPageState extends State<ProductViewPage> {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setModal) {
-            final total = _priceValue * qty;
+            final effectivePrice = _selectedVariantPrice ?? _priceValue;
+            final total = effectivePrice * qty;
             return Listener(
               onPointerDown: (_) =>
                   FocusManager.instance.primaryFocus?.unfocus(),
@@ -1173,7 +1181,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  '\u20b1${_formatPrice(_priceValue)}/$_unitType',
+                                  '\u20b1${_formatPrice(effectivePrice)}/$_unitType',
                                   style: const TextStyle(
                                     fontSize: 14,
                                     fontWeight: FontWeight.w800,

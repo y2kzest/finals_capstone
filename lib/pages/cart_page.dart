@@ -606,16 +606,21 @@ class _CartPageState extends State<CartPage> {
         }
 
         // Buyer notification
-        await supabase.from('notifications').insert({
-          'user_id': user.id,
-          'type': isOnline ? 'order_pending_payment' : 'order_placed',
-          'title': isOnline ? 'Awaiting Payment' : 'Order Placed',
-          'message': isOnline
-              ? '${item['product_name'] ?? 'Item'} x$qty — waiting for your '
-                  '${walletMethod?.label ?? 'online'} payment'
-              : '${item['product_name'] ?? 'Item'} x$qty — P${(price * qty).toStringAsFixed(0)} order sent to ${item['store_name'] ?? 'seller'}',
-          'is_read': false,
-        });
+        try {
+          await supabase.from('notifications').insert({
+            'user_id': user.id,
+            'type': isOnline ? 'order_pending_payment' : 'order_placed',
+            'title': isOnline ? 'Awaiting Payment' : 'Order Placed',
+            'message': isOnline
+                ? '${item['product_name'] ?? 'Item'} x$qty — waiting for your '
+                    '${walletMethod?.label ?? 'online'} payment'
+                : '${item['product_name'] ?? 'Item'} x$qty — P${(price * qty).toStringAsFixed(0)} order sent to ${item['store_name'] ?? 'seller'}',
+            'order_id': orderRes['id'],
+            'is_read': false,
+          });
+        } catch (e) {
+          debugPrint('Buyer notification insert failed: $e');
+        }
       }
 
       // COD path: clear cart immediately and celebrate

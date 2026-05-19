@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../seller_pages/order.dart';
+import 'seller_receipt_sheet.dart';
 
 class SellerNotificationOverlay extends StatefulWidget {
   const SellerNotificationOverlay({super.key, required this.child});
@@ -151,11 +152,19 @@ class _SellerNotificationOverlayState extends State<SellerNotificationOverlay>
     });
   }
 
-  void _viewOrders() {
+  void _handleAction() {
+    final notif = _current;
+    if (notif == null) return;
+    final type    = notif['type']?.toString() ?? '';
+    final orderId = notif['order_id']?.toString();
     _dismiss();
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const OrdersPage()),
-    );
+    if (type == 'payment_received' && orderId != null && orderId.isNotEmpty) {
+      showSellerReceipt(context, orderId);
+    } else {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const OrdersPage()),
+      );
+    }
   }
 
   void _onDragUpdate(DragUpdateDetails d) {
@@ -197,7 +206,7 @@ class _SellerNotificationOverlayState extends State<SellerNotificationOverlay>
                         iconAnim: _iconScaleAnim,
                         queueCount: _queue.length,
                         onDismiss: _dismiss,
-                        onViewOrders: _viewOrders,
+                        onAction: _handleAction,
                       ),
                     ),
                   ),
@@ -219,7 +228,7 @@ class _SellerNotifCard extends StatelessWidget {
     required this.iconAnim,
     required this.queueCount,
     required this.onDismiss,
-    required this.onViewOrders,
+    required this.onAction,
   });
 
   final Map<String, dynamic> notif;
@@ -227,7 +236,7 @@ class _SellerNotifCard extends StatelessWidget {
   final Animation<double> iconAnim;
   final int queueCount;
   final VoidCallback onDismiss;
-  final VoidCallback onViewOrders;
+  final VoidCallback onAction;
 
   static Color _accent(String type) {
     switch (type) {
@@ -399,10 +408,10 @@ class _SellerNotifCard extends StatelessWidget {
                                   Row(
                                     children: [
                                       _GradientChip(
-                                        label: 'View Orders',
+                                        label: type == 'payment_received' ? 'View Receipt' : 'View Orders',
                                         accent: accent,
                                         accentLight: accentLight,
-                                        onTap: onViewOrders,
+                                        onTap: onAction,
                                       ),
                                       const SizedBox(width: 7),
                                       _GhostChip(

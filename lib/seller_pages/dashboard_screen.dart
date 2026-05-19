@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/seller_approval_notifications.dart';
 import '../utils/seller_notification_overlay.dart';
+import '../utils/seller_receipt_sheet.dart';
 import '../bahay.dart';
 import 'addproduct.dart';
 import 'inventory.dart';
@@ -1887,11 +1888,21 @@ class _SellerNotifItem extends StatelessWidget {
         icon = Icons.shopping_bag_rounded;
     }
 
-    return Container(
-      color: isRead
-          ? Colors.transparent
-          : kPrimary.withValues(alpha: 0.03),
-      child: Padding(
+    final orderId = notif['order_id']?.toString();
+
+    void onTap() {
+      if (type == 'payment_received' && orderId != null && orderId.isNotEmpty) {
+        showSellerReceipt(context, orderId);
+      } else {
+        Navigator.push(context, MaterialPageRoute(builder: (_) => const OrdersPage()));
+      }
+    }
+
+    return Material(
+      color: isRead ? Colors.transparent : kPrimary.withValues(alpha: 0.03),
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1976,6 +1987,7 @@ class _SellerNotifItem extends StatelessWidget {
               ),
             ),
           ],
+        ),
         ),
       ),
     );

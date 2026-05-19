@@ -260,7 +260,10 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
         }
       }
 
-      // Notify buyer of status change
+      if (mounted) setState(() => _orderFutures.clear());
+
+      // Notify buyer — in a separate try/catch so a notification failure
+      // never rolls back the order status update that already succeeded.
       if (order != null) {
         final buyerId = order['buyer_id']?.toString();
         final productName = order['product_name']?.toString() ?? 'Your order';
@@ -300,18 +303,20 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
               message = '$productName status changed to $newStatus.';
               type = 'order_update';
           }
-          await supabase.from('notifications').insert({
-            'user_id': buyerId,
-            'type': type,
-            'title': title,
-            'message': message,
-            'order_id': orderId,
-            'is_read': false,
-          });
+          try {
+            await supabase.from('notifications').insert({
+              'user_id': buyerId,
+              'type': type,
+              'title': title,
+              'message': message,
+              'order_id': orderId,
+              'is_read': false,
+            });
+          } catch (e) {
+            debugPrint('Buyer notification insert failed: $e');
+          }
         }
       }
-
-      if (mounted) setState(() {});
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
@@ -374,24 +379,28 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', orderId);
 
-      // Notify buyer
+      if (mounted) setState(() => _orderFutures.clear());
+
+      // Notify buyer — isolated so a notification failure never blocks the decline.
       if (orderData != null) {
         final buyerId = orderData['buyer_id']?.toString();
         final productName = orderData['product_name']?.toString() ?? 'Your order';
         if (buyerId != null && buyerId.isNotEmpty) {
           final reason = reasonCtrl.text.trim();
-          await supabase.from('notifications').insert({
-            'user_id': buyerId,
-            'type': 'order_declined',
-            'title': 'Order Declined',
-            'message': '$productName was declined${reason.isNotEmpty ? ': $reason' : '.'}',
-            'order_id': orderId,
-            'is_read': false,
-          });
+          try {
+            await supabase.from('notifications').insert({
+              'user_id': buyerId,
+              'type': 'order_declined',
+              'title': 'Order Declined',
+              'message': '$productName was declined${reason.isNotEmpty ? ': $reason' : '.'}',
+              'order_id': orderId,
+              'is_read': false,
+            });
+          } catch (e) {
+            debugPrint('Buyer decline notification failed: $e');
+          }
         }
       }
-
-      if (mounted) setState(() {});
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));

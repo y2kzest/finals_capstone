@@ -177,6 +177,7 @@ Deno.serve(async (req) => {
       // Notify sellers + buyers now that payment is confirmed.
       // (Seller notifications were intentionally skipped on order insert for
       // online-payment orders, so unpaid orders don't reach the seller.)
+      // Each insert is isolated so one failure never blocks the others.
       for (const o of orders) {
         const qty = Number(o.qty ?? 1);
         const total = Number(o.total_amount ?? 0);
@@ -184,31 +185,35 @@ Deno.serve(async (req) => {
           `${o.product_name ?? 'Item'} x${qty} — ₱${total.toFixed(0)}` +
           (o.order_type === 'delivery' ? ' (Delivery)' : '');
         if (o.seller_id) {
-          await admin.from('seller_notifications').insert({
-            seller_id: o.seller_id,
-            order_id: o.id,
-            title: 'New Order — GCash Paid!',
-            body: itemLine,
-            type: 'new_order',
-          });
-          // Separate payment-receipt notification so the seller can see it
-          // in the notification panel alongside the order notification.
-          await admin.from('seller_notifications').insert({
-            seller_id: o.seller_id,
-            order_id: o.id,
-            title: 'Payment Received',
-            body: `GCash payment of ₱${total.toFixed(2)} confirmed for ${o.product_name ?? 'your order'}.`,
-            type: 'payment_received',
-          });
+          try {
+            await admin.from('seller_notifications').insert({
+              seller_id: o.seller_id,
+              order_id: o.id,
+              title: 'New Order — GCash Paid!',
+              body: itemLine,
+              type: 'new_order',
+            });
+          } catch (e) { console.error('seller new_order notif failed (gcash)', e); }
+          try {
+            await admin.from('seller_notifications').insert({
+              seller_id: o.seller_id,
+              order_id: o.id,
+              title: 'Payment Received',
+              body: `GCash payment of ₱${total.toFixed(2)} confirmed for ${o.product_name ?? 'your order'}.`,
+              type: 'payment_received',
+            });
+          } catch (e) { console.error('seller payment_received notif failed (gcash)', e); }
         }
-        await admin.from('notifications').insert({
-          user_id: o.buyer_id,
-          type: 'payment_received',
-          title: 'GCash Payment Confirmed',
-          message: `Your GCash payment of ₱${total.toFixed(2)} for ${o.product_name ?? 'your order'} was received.`,
-          order_id: o.id,
-          is_read: false,
-        });
+        try {
+          await admin.from('notifications').insert({
+            user_id: o.buyer_id,
+            type: 'payment_received',
+            title: 'GCash Payment Confirmed',
+            message: `Your GCash payment of ₱${total.toFixed(2)} for ${o.product_name ?? 'your order'} was received.`,
+            order_id: o.id,
+            is_read: false,
+          });
+        } catch (e) { console.error('buyer notif failed (gcash)', e); }
       }
 
       return text('ok', 200);
@@ -255,31 +260,35 @@ Deno.serve(async (req) => {
           `${o.product_name ?? 'Item'} x${qty} — ₱${total.toFixed(0)}` +
           (o.order_type === 'delivery' ? ' (Delivery)' : '');
         if (o.seller_id) {
-          await admin.from('seller_notifications').insert({
-            seller_id: o.seller_id,
-            order_id: o.id,
-            title: 'New Order — Maya Paid!',
-            body: itemLine,
-            type: 'new_order',
-          });
-          // Separate payment-receipt notification so the seller can see it
-          // in the notification panel alongside the order notification.
-          await admin.from('seller_notifications').insert({
-            seller_id: o.seller_id,
-            order_id: o.id,
-            title: 'Payment Received',
-            body: `Maya payment of ₱${total.toFixed(2)} confirmed for ${o.product_name ?? 'your order'}.`,
-            type: 'payment_received',
-          });
+          try {
+            await admin.from('seller_notifications').insert({
+              seller_id: o.seller_id,
+              order_id: o.id,
+              title: 'New Order — Maya Paid!',
+              body: itemLine,
+              type: 'new_order',
+            });
+          } catch (e) { console.error('seller new_order notif failed (maya)', e); }
+          try {
+            await admin.from('seller_notifications').insert({
+              seller_id: o.seller_id,
+              order_id: o.id,
+              title: 'Payment Received',
+              body: `Maya payment of ₱${total.toFixed(2)} confirmed for ${o.product_name ?? 'your order'}.`,
+              type: 'payment_received',
+            });
+          } catch (e) { console.error('seller payment_received notif failed (maya)', e); }
         }
-        await admin.from('notifications').insert({
-          user_id: o.buyer_id,
-          type: 'payment_received',
-          title: 'Maya Payment Confirmed',
-          message: `Your Maya payment of ₱${total.toFixed(2)} for ${o.product_name ?? 'your order'} was received.`,
-          order_id: o.id,
-          is_read: false,
-        });
+        try {
+          await admin.from('notifications').insert({
+            user_id: o.buyer_id,
+            type: 'payment_received',
+            title: 'Maya Payment Confirmed',
+            message: `Your Maya payment of ₱${total.toFixed(2)} for ${o.product_name ?? 'your order'} was received.`,
+            order_id: o.id,
+            is_read: false,
+          });
+        } catch (e) { console.error('buyer notif failed (maya)', e); }
       }
 
       return text('ok', 200);
