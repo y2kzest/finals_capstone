@@ -20,6 +20,8 @@ class _Stall {
     required this.isOpen,
     required this.point,
     required this.logoUrl,
+    required this.openingTime,
+    required this.closingTime,
   });
 
   final String userId;
@@ -28,7 +30,27 @@ class _Stall {
   final bool isOpen;
   final LatLng point;
   final String? logoUrl;
+  final String openingTime;
+  final String closingTime;
   int productCount = 0;
+
+  /// True only when the seller has toggled open AND the current clock time
+  /// falls within their opening/closing hours — same logic used by home_page,
+  /// cart_page, productdet, and seller_profile_page.
+  bool get isCurrentlyOpen {
+    if (!isOpen) return false;
+    try {
+      final now = TimeOfDay.now();
+      final open = openingTime.split(':');
+      final close = closingTime.split(':');
+      final openMin = int.parse(open[0]) * 60 + int.parse(open[1]);
+      final closeMin = int.parse(close[0]) * 60 + int.parse(close[1]);
+      final nowMin = now.hour * 60 + now.minute;
+      return nowMin >= openMin && nowMin <= closeMin;
+    } catch (_) {
+      return isOpen;
+    }
+  }
 
   double? distanceMetersFrom(LatLng? me) =>
       me == null ? null : distanceMeters(me, point);
@@ -105,7 +127,7 @@ class _MarketMapPageState extends State<MarketMapPage>
       final rows = await _supabase
           .from('seller_profiles')
           .select(
-              'user_id, store_name, stall_no, is_open, stall_lat, stall_lng, logo_url, approval_status')
+              'user_id, store_name, stall_no, is_open, stall_lat, stall_lng, logo_url, approval_status, opening_time, closing_time')
           .not('stall_lat', 'is', null)
           .not('stall_lng', 'is', null);
 
@@ -126,6 +148,8 @@ class _MarketMapPageState extends State<MarketMapPage>
           isOpen: row['is_open'] == true,
           point: LatLng(lat, lng),
           logoUrl: row['logo_url']?.toString(),
+          openingTime: row['opening_time']?.toString() ?? '05:00',
+          closingTime: row['closing_time']?.toString() ?? '19:00',
         ));
       }
 
@@ -265,7 +289,7 @@ class _MarketMapPageState extends State<MarketMapPage>
 
   List<_Stall> get _visibleStalls {
     var list = _showOpenOnly
-        ? _stalls.where((s) => s.isOpen).toList()
+        ? _stalls.where((s) => s.isCurrentlyOpen).toList()
         : List<_Stall>.from(_stalls);
     if (_searchQuery.isNotEmpty) {
       list = list.where((s) => s.storeName.toLowerCase().contains(_searchQuery)).toList();
@@ -394,7 +418,7 @@ class _MarketMapPageState extends State<MarketMapPage>
                               ),
                             ),
                           const SizedBox(height: 6),
-                          _statusChip(stall.isOpen),
+                          _statusChip(stall.isCurrentlyOpen),
                         ],
                       ),
                     ),
@@ -432,6 +456,39 @@ class _MarketMapPageState extends State<MarketMapPage>
                           ),
                         ),
                       ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF7F8FC),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFE5E7EB)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.schedule_rounded,
+                        size: 18,
+                        color: stall.isCurrentlyOpen
+                            ? const Color(0xFF1F9D4D)
+                            : const Color(0xFFD23B3B),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        stall.isCurrentlyOpen
+                            ? 'Open · Closes ${_to12Hour(stall.closingTime)}'
+                            : 'Closed · Opens ${_to12Hour(stall.openingTime)}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: stall.isCurrentlyOpen
+                              ? const Color(0xFF1F6F3A)
+                              : const Color(0xFFA12121),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -571,7 +628,7 @@ class _MarketMapPageState extends State<MarketMapPage>
             alignment: Alignment.center,
             children: [
               // Pulsing glow ring for open stalls
-              if (stall.isOpen)
+              if (stall.isCurrentlyOpen)
                 AnimatedBuilder(
                   animation: _pulseCtrl,
                   builder: (context, child) {
@@ -596,7 +653,7 @@ class _MarketMapPageState extends State<MarketMapPage>
                   color: Colors.white,
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: stall.isOpen ? _kPrimary : const Color(0xFF9CA3AF),
+                    color: stall.isCurrentlyOpen ? _kPrimary : const Color(0xFF9CA3AF),
                     width: 2.5,
                   ),
                   boxShadow: const [
@@ -626,7 +683,7 @@ class _MarketMapPageState extends State<MarketMapPage>
           CustomPaint(
             size: const Size(10, 6),
             painter: _MarkerTailPainter(
-              color: stall.isOpen ? _kPrimary : const Color(0xFF9CA3AF),
+              color: stall.isCurrentlyOpen ? _kPrimary : const Color(0xFF9CA3AF),
             ),
           ),
         ],
@@ -674,6 +731,20 @@ class _MarketMapPageState extends State<MarketMapPage>
         );
       },
     );
+  }
+
+  String _to12Hour(String time) {
+    try {
+      final parts = time.split(':');
+      var hour = int.parse(parts[0]);
+      final minute = parts[1];
+      final suffix = hour >= 12 ? 'PM' : 'AM';
+      if (hour > 12) hour -= 12;
+      if (hour == 0) hour = 12;
+      return '$hour:$minute $suffix';
+    } catch (_) {
+      return time;
+    }
   }
 
   // ── Walk-time estimate ───────────────────────────────────────
@@ -912,7 +983,7 @@ class _MarketMapPageState extends State<MarketMapPage>
                     ],
                   ),
                 ),
-                _statusChip(stall.isOpen),
+                _statusChip(stall.isCurrentlyOpen),
               ],
             ),
           ),
@@ -924,7 +995,7 @@ class _MarketMapPageState extends State<MarketMapPage>
   @override
   Widget build(BuildContext context) {
     final stalls = _visibleStalls;
-    final openCount = _stalls.where((s) => s.isOpen).length;
+    final openCount = _stalls.where((s) => s.isCurrentlyOpen).length;
     final top = MediaQuery.of(context).padding.top;
     final screenH = MediaQuery.of(context).size.height;
 
