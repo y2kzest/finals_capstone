@@ -121,10 +121,10 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen>
   }
 
   Future<void> _loadProducts() async {
-    setState(() => _isLoading = true);
+    if (mounted) setState(() => _isLoading = true);
     final userId = supabase.auth.currentUser?.id;
     if (userId == null) {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
       return;
     }
     try {
@@ -179,7 +179,7 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen>
         });
       }
     } catch (e) {
-      debugPrint('Sales log load error: \$e');
+      debugPrint('Sales log load error: $e');
     }
   }
 
@@ -222,7 +222,7 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen>
           productName: productName ?? 'Item',
         );
       }
-      _loadProducts();
+      if (mounted) _loadProducts();
     } catch (e) {
       debugPrint('Stock update error: $e');
     }
@@ -443,10 +443,12 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen>
     final priceController = TextEditingController(
       text: (product['price'] ?? '').toString(),
     );
+    bool isRecording = false;
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
@@ -530,12 +532,12 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen>
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
+            onPressed: isRecording ? null : () => Navigator.pop(ctx),
             child:
                 const Text('Cancel', style: TextStyle(color: _kTextSecondary)),
           ),
           ElevatedButton.icon(
-            onPressed: () async {
+            onPressed: isRecording ? null : () async {
               final qty = int.tryParse(qtyController.text) ?? 0;
               if (qty <= 0 || qty > currentStock) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -548,58 +550,75 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen>
                 );
                 return;
               }
-              final newStock = currentStock - qty;
-              await _updateStock(
-                product['id'].toString(),
-                newStock,
-                previousStock: currentStock,
-                productName: (product['name'] ?? product['product_name'])
-                    ?.toString(),
-              );
-
-              // Try to log the sale in inventory_log table
+              setDialogState(() => isRecording = true);
               try {
-                final userId = supabase.auth.currentUser?.id;
-                final price =
-                    double.tryParse(priceController.text) ?? 0;
-                await supabase.from('inventory_log').insert({
-                  'user_id': userId,
-                  'product_id': product['id'].toString(),
-                  'product_name': product['name'] ?? 'Product',
-                  'type': 'sale',
-                  'quantity': qty,
-                  'price_per_unit': price,
-                  'total_amount': price * qty,
-                  'notes': 'Manual sale recorded',
-                  'created_at': DateTime.now().toIso8601String(),
-                });
-                _loadSalesLog();
-              } catch (_) {
-                // inventory_log table may not exist yet
-              }
-
-              if (!ctx.mounted) return;
-              Navigator.pop(ctx);
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                        'Sale recorded: $qty × ${product['name']}'),
-                    backgroundColor: _kGreen,
-                  ),
+                final newStock = currentStock - qty;
+                await _updateStock(
+                  product['id'].toString(),
+                  newStock,
+                  previousStock: currentStock,
+                  productName: (product['name'] ?? product['product_name'])
+                      ?.toString(),
                 );
+
+                // Try to log the sale in inventory_log table
+                try {
+                  final userId = supabase.auth.currentUser?.id;
+                  final price =
+                      double.tryParse(priceController.text) ?? 0;
+                  await supabase.from('inventory_log').insert({
+                    'user_id': userId,
+                    'product_id': product['id'].toString(),
+                    'product_name': product['name'] ?? 'Product',
+                    'type': 'sale',
+                    'quantity': qty,
+                    'price_per_unit': price,
+                    'total_amount': price * qty,
+                    'notes': 'Manual sale recorded',
+                    'created_at': DateTime.now().toIso8601String(),
+                  });
+                  _loadSalesLog();
+                } catch (_) {
+                  // inventory_log table may not exist yet
+                }
+
+                if (!ctx.mounted) return;
+                Navigator.pop(ctx);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                          'Sale recorded: $qty × ${product['name']}'),
+                      backgroundColor: _kGreen,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (ctx.mounted) setDialogState(() => isRecording = false);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error recording sale: $e'),
+                      backgroundColor: _kRed,
+                    ),
+                  );
+                }
               }
             },
-            icon: const Icon(Icons.check, size: 18),
-            label: const Text('Record Sale'),
+            icon: isRecording
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.check, size: 18),
+            label: Text(isRecording ? 'Recording...' : 'Record Sale'),
             style: ElevatedButton.styleFrom(
               backgroundColor: _kGreen,
               foregroundColor: Colors.white,
+              disabledBackgroundColor: _kGreen.withValues(alpha: 0.5),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
             ),
           ),
         ],
+      ),
       ),
     );
   }

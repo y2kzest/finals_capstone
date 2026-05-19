@@ -34,6 +34,9 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
   Set<String> _sukiBuyerIds = {};
   static const int _sukiThreshold = 10;
 
+  // order IDs currently being processed (prevents double-tap)
+  final Set<String> _busyOrderIds = {};
+
   @override
   void initState() {
     super.initState();
@@ -42,6 +45,16 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     _loadAutoAcceptSetting();
     _subscribeRealtime();
     _loadSukiBuyers();
+  }
+
+  Future<void> _setOrderBusy(String orderId, Future<void> Function() op) async {
+    if (_busyOrderIds.contains(orderId)) return;
+    if (mounted) setState(() => _busyOrderIds.add(orderId));
+    try {
+      await op();
+    } finally {
+      if (mounted) setState(() => _busyOrderIds.remove(orderId));
+    }
   }
 
   Future<void> _loadSukiBuyers() async {
@@ -399,7 +412,11 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
       ),
     );
 
-    if (confirmed != true) return;
+    if (confirmed != true) {
+      reasonCtrl.dispose();
+      return;
+    }
+    if (mounted) setState(() => _busyOrderIds.add(orderId));
     try {
       // Fetch order details for buyer notification
       final orderData = await supabase
@@ -437,10 +454,13 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
         }
       }
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busyOrderIds.remove(orderId));
+      reasonCtrl.dispose();
     }
-    reasonCtrl.dispose();
   }
 
   Future<void> _showVerifyPickupDialog(String orderId, Map<String, dynamic> order) async {
@@ -1211,14 +1231,16 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                     child: SizedBox(
                       height: actionHeight,
                       child: OutlinedButton(
-                        onPressed: () => _declineOrder(orderId),
+                        onPressed: _busyOrderIds.contains(orderId) ? null : () => _declineOrder(orderId),
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                           foregroundColor: _kRed,
-                          side: const BorderSide(color: _kRed),
+                          side: BorderSide(color: _busyOrderIds.contains(orderId) ? Colors.grey.shade300 : _kRed),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
-                        child: const Text('Decline', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                        child: _busyOrderIds.contains(orderId)
+                            ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: _kRed))
+                            : const Text('Decline', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
                       ),
                     ),
                   ),
@@ -1228,15 +1250,18 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                     child: SizedBox(
                       height: actionHeight,
                       child: ElevatedButton(
-                        onPressed: () => _updateStatus(orderId, 'preparing', o),
+                        onPressed: _busyOrderIds.contains(orderId) ? null : () => _setOrderBusy(orderId, () => _updateStatus(orderId, 'preparing', o)),
                         style: ElevatedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                           backgroundColor: _kGreen,
                           foregroundColor: Colors.white,
+                          disabledBackgroundColor: _kGreen.withValues(alpha: 0.5),
                           elevation: 0,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
-                        child: const Text('Accept Order', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                        child: _busyOrderIds.contains(orderId)
+                            ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Text('Accept Order', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
                       ),
                     ),
                   ),
@@ -1250,18 +1275,21 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
               child: SizedBox(
                 width: double.infinity, height: actionHeight,
                 child: ElevatedButton(
-                  onPressed: () => _updateStatus(orderId, 'ready', o),
+                  onPressed: _busyOrderIds.contains(orderId) ? null : () => _setOrderBusy(orderId, () => _updateStatus(orderId, 'ready', o)),
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                     backgroundColor: _kPrimary,
                     foregroundColor: Colors.white,
+                    disabledBackgroundColor: _kPrimary.withValues(alpha: 0.5),
                     elevation: 0,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  child: Text(
-                    isDelivery ? 'Send Out for Delivery' : 'Mark Ready for Pickup',
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                  ),
+                  child: _busyOrderIds.contains(orderId)
+                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : Text(
+                          isDelivery ? 'Send Out for Delivery' : 'Mark Ready for Pickup',
+                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                        ),
                 ),
               ),
             ),
@@ -1274,8 +1302,10 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                       width: double.infinity,
                       height: actionHeight,
                       child: ElevatedButton.icon(
-                        onPressed: () => _updateStatus(orderId, 'completed', o),
-                        icon: const Icon(Icons.check_circle_rounded, size: 18),
+                        onPressed: _busyOrderIds.contains(orderId) ? null : () => _setOrderBusy(orderId, () => _updateStatus(orderId, 'completed', o)),
+                        icon: _busyOrderIds.contains(orderId)
+                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.check_circle_rounded, size: 18),
                         label: const Text(
                           'Mark as Delivered',
                           style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
@@ -1284,6 +1314,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                           backgroundColor: _kGreen,
                           foregroundColor: Colors.white,
+                          disabledBackgroundColor: _kGreen.withValues(alpha: 0.5),
                           elevation: 0,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),

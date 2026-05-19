@@ -37,6 +37,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
   bool _showReviews = false;
   bool _inWishlist = false;
   bool _isSuki = false;
+  bool _isAddingToCart = false;
   String? _sellerLogoUrl;
   bool _sellerIsOpen = false;
   String _sellerOpenTime = '05:00';
@@ -607,6 +608,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
 
   /// Shown when the buyer taps "Add to Cart" — opens the options sheet first.
   Future<void> _onAddToCartTapped() async {
+    if (_isAddingToCart) return;
     final result = await showProductOptionsSheet(
       context: context,
       product: widget.product,
@@ -615,15 +617,20 @@ class _ProductViewPageState extends State<ProductViewPage> {
     );
     if (result == null) return;
     setState(() {
+      _isAddingToCart = true;
       _quantity = _clampQty(result.qty);
       _selectedVariantPrice = result.effectivePrice;
       _selectedVariantName = result.selectedVariant?.name;
     });
-    await _addToCart(
-      selectedVariant: result.selectedVariant?.name,
-      note: result.note,
-      price: result.effectivePrice,
-    );
+    try {
+      await _addToCart(
+        selectedVariant: result.selectedVariant?.name,
+        note: result.note,
+        price: result.effectivePrice,
+      );
+    } finally {
+      if (mounted) setState(() => _isAddingToCart = false);
+    }
   }
 
   /// Shown when the buyer taps "Buy Now" — opens the options sheet, then the
@@ -2769,21 +2776,26 @@ class _ProductViewPageState extends State<ProductViewPage> {
                     children: [
                       Expanded(
                         child: OutlinedButton(
-                          onPressed: _onAddToCartTapped,
+                          onPressed: _isAddingToCart ? null : _onAddToCartTapped,
                           style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: Color(0xFF1A3C8C)),
+                            side: BorderSide(color: _isAddingToCart ? const Color(0xFFB0B8C4) : const Color(0xFF1A3C8C)),
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(30),
                             ),
                           ),
-                          child: const Text(
-                            'Add To Cart',
-                            style: TextStyle(
-                              color: Color(0xFF1A3C8C),
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
+                          child: _isAddingToCart
+                              ? const SizedBox(
+                                  width: 18, height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF1A3C8C)),
+                                )
+                              : const Text(
+                                  'Add To Cart',
+                                  style: TextStyle(
+                                    color: Color(0xFF1A3C8C),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
                         ),
                       ),
                       const SizedBox(width: 10),

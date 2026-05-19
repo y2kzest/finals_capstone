@@ -96,6 +96,7 @@ class _HomePageState extends State<HomePage> {
     final user = client.auth.currentUser;
     if (user == null) return;
     _notifChannel?.unsubscribe();
+    if (_notifChannel != null) client.removeChannel(_notifChannel!);
     _notifChannel = client
         .channel('public:notifications:user_${user.id}')
         .onPostgresChanges(
@@ -122,6 +123,7 @@ class _HomePageState extends State<HomePage> {
 
   void _subscribeToProducts() {
     _productsChannel?.unsubscribe();
+    if (_productsChannel != null) Supabase.instance.client.removeChannel(_productsChannel!);
     _productsChannel = Supabase.instance.client
         .channel('public:product:featured')
         .onPostgresChanges(
@@ -160,7 +162,9 @@ class _HomePageState extends State<HomePage> {
     _bannerAutoplay?.cancel();
     _bannerController.dispose();
     _notifChannel?.unsubscribe();
+    if (_notifChannel != null) Supabase.instance.client.removeChannel(_notifChannel!);
     _productsChannel?.unsubscribe();
+    if (_productsChannel != null) Supabase.instance.client.removeChannel(_productsChannel!);
     super.dispose();
   }
 
