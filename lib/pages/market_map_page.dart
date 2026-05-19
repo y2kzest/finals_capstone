@@ -997,7 +997,6 @@ class _MarketMapPageState extends State<MarketMapPage>
     final stalls = _visibleStalls;
     final openCount = _stalls.where((s) => s.isCurrentlyOpen).length;
     final top = MediaQuery.of(context).padding.top;
-    final screenH = MediaQuery.of(context).size.height;
 
     return Scaffold(
       backgroundColor: const Color(0xFFE8EAF0),
@@ -1084,10 +1083,10 @@ class _MarketMapPageState extends State<MarketMapPage>
                       _buildBottomSheet(stalls, scrollCtrl, openCount),
                 ),
 
-                // ── FABs (above bottom sheet minimum) ───────────────
+                // ── FABs (top-right, below the search bar) ──────────
                 Positioned(
                   right: 12,
-                  bottom: screenH * 0.14,
+                  top: top + 64,
                   child: Column(
                     children: [
                       FloatingActionButton.small(
