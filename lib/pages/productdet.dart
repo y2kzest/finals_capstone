@@ -36,6 +36,7 @@ class _ProductViewPageState extends State<ProductViewPage> {
   String? _selectedVariantName;
   bool _showReviews = false;
   bool _inWishlist = false;
+  bool _isSuki = false;
   String? _sellerLogoUrl;
   bool _sellerIsOpen = false;
   String _sellerOpenTime = '05:00';
@@ -397,6 +398,21 @@ class _ProductViewPageState extends State<ProductViewPage> {
           _storeLng = (resp['stall_lng'] as num?)?.toDouble();
           _sellerDeliveryEnabled = resp['delivery_enabled'] == true;
         });
+      }
+      // Check suki status: has this buyer completed >= 3 orders with this seller?
+      final buyerId = Supabase.instance.client.auth.currentUser?.id;
+      if (buyerId != null && buyerId != sellerId) {
+        try {
+          final orders = await Supabase.instance.client
+              .from('orders')
+              .select('id')
+              .eq('buyer_id', buyerId)
+              .eq('seller_id', sellerId)
+              .eq('status', 'completed');
+          if (mounted) {
+            setState(() => _isSuki = (orders as List).length >= 10);
+          }
+        } catch (_) {}
       }
     } catch (_) {}
   }
@@ -2320,6 +2336,32 @@ class _ProductViewPageState extends State<ProductViewPage> {
                                       ),
                                     ),
                                   ),
+                                  if (_isSuki) ...[
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFFFFBEB),
+                                        borderRadius: BorderRadius.circular(999),
+                                        border: Border.all(color: const Color(0xFFFFB800)),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.stars_rounded, size: 11, color: Color(0xFFD97706)),
+                                          SizedBox(width: 3),
+                                          Text(
+                                            'Your Suki',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w800,
+                                              color: Color(0xFFD97706),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                  ],
                                   Container(
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 8,

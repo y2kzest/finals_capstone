@@ -2422,6 +2422,7 @@ class _HomePageState extends State<HomePage> {
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
               ClipRRect(
                 borderRadius: const BorderRadius.vertical(
@@ -2990,7 +2991,7 @@ class _HomePageState extends State<HomePage> {
                 ),
                   const SizedBox(height: 14),
                   SizedBox(
-                    height: 248,
+                    height: 268,
                     child: isLoading
                         ? _todayPickShimmerRow()
                         : visibleTodayPicks.isEmpty

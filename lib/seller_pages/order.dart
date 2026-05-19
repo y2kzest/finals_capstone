@@ -30,6 +30,10 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
   bool _autoAccept = false;
   final Map<String, Future<List<Map<String, dynamic>>>> _orderFutures = {};
 
+  // buyer IDs who have >= 3 completed orders with this seller
+  Set<String> _sukiBuyerIds = {};
+  static const int _sukiThreshold = 10;
+
   @override
   void initState() {
     super.initState();
@@ -37,6 +41,35 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     _fetchUnreadCount();
     _loadAutoAcceptSetting();
     _subscribeRealtime();
+    _loadSukiBuyers();
+  }
+
+  Future<void> _loadSukiBuyers() async {
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) return;
+    try {
+      final res = await supabase
+          .from('orders')
+          .select('buyer_id')
+          .eq('seller_id', userId)
+          .eq('status', 'completed');
+      final counts = <String, int>{};
+      for (final row in res as List) {
+        final bid = row['buyer_id']?.toString();
+        if (bid == null) continue;
+        counts[bid] = (counts[bid] ?? 0) + 1;
+      }
+      if (mounted) {
+        setState(() {
+          _sukiBuyerIds = counts.entries
+              .where((e) => e.value >= _sukiThreshold)
+              .map((e) => e.key)
+              .toSet();
+        });
+      }
+    } catch (e) {
+      debugPrint('Suki load error: $e');
+    }
   }
 
   Future<void> _loadAutoAcceptSetting() async {
@@ -261,6 +294,8 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
       }
 
       if (mounted) setState(() => _orderFutures.clear());
+      // Refresh suki set when an order is completed — new suki buyers may have qualified.
+      if (newStatus == 'completed') _loadSukiBuyers();
 
       // Notify buyer — in a separate try/catch so a notification failure
       // never rolls back the order status update that already succeeded.
@@ -779,7 +814,23 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
           child: ListView.builder(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
             itemCount: orders.length,
-            itemBuilder: (ctx, i) => _buildOrderCard(orders[i], status),
+            itemBuilder: (ctx, i) {
+              final order = orders[i];
+              return TweenAnimationBuilder<double>(
+                key: ValueKey(order['id']),
+                tween: Tween(begin: 0.0, end: 1.0),
+                duration: Duration(milliseconds: 300 + i * 55),
+                curve: Curves.easeOutCubic,
+                builder: (_, v, child) => Opacity(
+                  opacity: v,
+                  child: Transform.translate(
+                    offset: Offset(0, 18 * (1 - v)),
+                    child: child,
+                  ),
+                ),
+                child: _buildOrderCard(order, status),
+              );
+            },
           ),
         );
       },
@@ -815,14 +866,48 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: status == 'pending' ? const Color(0xFFFFFDF5) : Colors.white,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 4))],
+        boxShadow: [
+          BoxShadow(color: color.withValues(alpha: 0.14), blurRadius: 16, offset: const Offset(0, 4)),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 6, offset: const Offset(0, 2)),
+        ],
       ),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Column(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 400),
+              height: 4,
+              color: color,
+            ),
+            if (status == 'pending')
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(16, 7, 16, 7),
+                decoration: BoxDecoration(
+                  color: _kAmber.withValues(alpha: 0.08),
+                  border: Border(bottom: BorderSide(color: _kAmber.withValues(alpha: 0.18))),
+                ),
+                child: Row(
+                  children: [
+                    _PulsingDot(color: _kAmber),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'NEW ORDER',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: _kAmber,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -932,6 +1017,10 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                     ],
                   ),
                 ),
+                if (_sukiBuyerIds.contains(o['buyer_id']?.toString())) ...[
+                  const SizedBox(width: 6),
+                  const _SukiBadge(),
+                ],
               ],
             ),
           ),
@@ -1239,6 +1328,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
           ] else
             const SizedBox(height: 14),
         ],
+        ),
       ),
     );
   }
@@ -1278,6 +1368,95 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
           const SizedBox(height: 6),
           Text('Pull down to refresh', style: TextStyle(color: Colors.grey[400], fontSize: 12)),
         ],
+      ),
+    );
+  }
+}
+
+// ── Suki badge ───────────────────────────────────────────────
+class _SukiBadge extends StatelessWidget {
+  const _SukiBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFFB800), Color(0xFFFF8C00)],
+        ),
+        borderRadius: BorderRadius.circular(999),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFFFB800).withValues(alpha: 0.35),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.stars_rounded, size: 10, color: Colors.white),
+          SizedBox(width: 3),
+          Text(
+            'SUKI',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+              color: Colors.white,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Pulsing dot indicator ────────────────────────────────────
+class _PulsingDot extends StatefulWidget {
+  const _PulsingDot({required this.color});
+  final Color color;
+
+  @override
+  State<_PulsingDot> createState() => _PulsingDotState();
+}
+
+class _PulsingDotState extends State<_PulsingDot>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    )..repeat(reverse: true);
+    _anim = Tween<double>(begin: 0.35, end: 1.0).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (_, _) => Container(
+        width: 8,
+        height: 8,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: widget.color.withValues(alpha: _anim.value),
+        ),
       ),
     );
   }

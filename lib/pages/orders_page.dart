@@ -327,6 +327,18 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     }
   }
 
+  Color _cardBg(String status) {
+    switch (status) {
+      case 'pending': return const Color(0xFFFFFDF5);
+      case 'preparing': case 'accepted': return const Color(0xFFF8FAFF);
+      case 'ready': return const Color(0xFFF0FDF8);
+      case 'completed': return const Color(0xFFFAF8FF);
+      case 'declined': return const Color(0xFFFFF8F8);
+      case 'cancelled': return const Color(0xFFF9FAFB);
+      default: return Colors.white;
+    }
+  }
+
   IconData _statusIcon(String status) {
     switch (status) {
       case 'pending': return Icons.schedule_rounded;
@@ -544,7 +556,23 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                           child: ListView.builder(
                             padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
                             itemCount: orders.length,
-                            itemBuilder: (ctx, i) => _buildOrderCard(orders[i]),
+                            itemBuilder: (ctx, i) {
+                              final order = orders[i];
+                              return TweenAnimationBuilder<double>(
+                                key: ValueKey(order['id']),
+                                tween: Tween(begin: 0.0, end: 1.0),
+                                duration: Duration(milliseconds: 300 + i * 55),
+                                curve: Curves.easeOutCubic,
+                                builder: (_, v, child) => Opacity(
+                                  opacity: v,
+                                  child: Transform.translate(
+                                    offset: Offset(0, 18 * (1 - v)),
+                                    child: child,
+                                  ),
+                                ),
+                                child: _buildOrderCard(order),
+                              );
+                            },
                           ),
                         );
                       }).toList(),
@@ -590,14 +618,24 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _cardBg(status),
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 4))],
+        boxShadow: [
+          BoxShadow(color: color.withValues(alpha: 0.14), blurRadius: 16, offset: const Offset(0, 4)),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 6, offset: const Offset(0, 2)),
+        ],
       ),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 14, 14, 0),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Column(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 400),
+              height: 4,
+              color: color,
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 0),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -765,15 +803,24 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Color(0xFF111827)),
                     ),
                     const SizedBox(height: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 400),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.1),
+                        color: color.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: color.withValues(alpha: 0.3)),
                       ),
-                      child: Text(
-                        status.toUpperCase(),
-                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: color, letterSpacing: 0.5),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(_statusIcon(status), size: 11, color: color),
+                          const SizedBox(width: 4),
+                          Text(
+                            status == 'preparing' ? 'ACCEPTED' : status.toUpperCase(),
+                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: color, letterSpacing: 0.5),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -1028,6 +1075,10 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
                 Text(_statusLabel(status, isDelivery: isDelivery),
                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color),
                 ),
+                if (status == 'pending') ...[
+                  const SizedBox(width: 8),
+                  _PulsingDot(color: color),
+                ],
                 if (status == 'declined' && declinedReason != null && declinedReason.isNotEmpty) ...[
                   const SizedBox(width: 8),
                   Expanded(
@@ -1041,6 +1092,7 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
             ),
           ),
         ],
+      ),
       ),
     );
   }
@@ -1065,6 +1117,53 @@ class _OrdersPageState extends State<OrdersPage> with SingleTickerProviderStateM
           const SizedBox(height: 6),
           Text('Pull down to refresh', style: TextStyle(color: Colors.grey[400], fontSize: 12)),
         ],
+      ),
+    );
+  }
+}
+
+class _PulsingDot extends StatefulWidget {
+  const _PulsingDot({required this.color});
+  final Color color;
+
+  @override
+  State<_PulsingDot> createState() => _PulsingDotState();
+}
+
+class _PulsingDotState extends State<_PulsingDot>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    )..repeat(reverse: true);
+    _anim = Tween<double>(begin: 0.35, end: 1.0).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (_, _) => Container(
+        width: 8,
+        height: 8,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: widget.color.withValues(alpha: _anim.value),
+        ),
       ),
     );
   }

@@ -38,6 +38,7 @@ class _ProfileState extends State<Profile>
   int _activeOrderCount = 0; // orders with status pending/accepted/ready
   int _wishlistCount = 0;
   int _voucherCount = 0;
+  List<Map<String, dynamic>> _sukiSellers = [];
 
   late final AnimationController _entryCtrl;
   late final Animation<double> _entryFade;
@@ -178,6 +179,35 @@ class _ProfileState extends State<Profile>
       if (mounted) {
         setState(() => _activeOrderCount = (activeRes as List).length);
       }
+    } catch (_) {}
+
+    // Suki sellers: group completed orders by seller, keep those with >= 3
+    try {
+      final completedRes = await supabase
+          .from('orders')
+          .select('seller_id, store_name, image_url')
+          .eq('buyer_id', user.id)
+          .eq('status', 'completed');
+      final counts = <String, Map<String, dynamic>>{};
+      for (final row in completedRes as List) {
+        final sid = row['seller_id']?.toString();
+        if (sid == null) continue;
+        if (!counts.containsKey(sid)) {
+          counts[sid] = {
+            'seller_id': sid,
+            'store_name': row['store_name']?.toString() ?? 'Market Stall',
+            'image_url': row['image_url']?.toString() ?? '',
+            'count': 0,
+          };
+        }
+        counts[sid]!['count'] = (counts[sid]!['count'] as int) + 1;
+      }
+      final suki = counts.values
+          .where((s) => (s['count'] as int) >= 10)
+          .toList()
+        ..sort((a, b) =>
+            (b['count'] as int).compareTo(a['count'] as int));
+      if (mounted) setState(() => _sukiSellers = suki);
     } catch (_) {}
 
     try {
@@ -1033,6 +1063,98 @@ class _ProfileState extends State<Profile>
               ],
             ),
           ),
+          if (_sukiSellers.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.stars_rounded, size: 15, color: Color(0xFFFFB800)),
+                      const SizedBox(width: 6),
+                      const Text(
+                        'Suki Sellers',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFB800).withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          '${_sukiSellers.length}',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFFFFB800),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Stores you\'ve ordered from 10+ times',
+                    style: TextStyle(fontSize: 11, color: Colors.white60),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _sukiSellers.map((s) {
+                      final name = s['store_name']?.toString() ?? 'Stall';
+                      final count = s['count'] as int;
+                      return Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: const Color(0xFFFFB800).withValues(alpha: 0.5),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.stars_rounded, size: 11, color: Color(0xFFFFB800)),
+                            const SizedBox(width: 5),
+                            Text(
+                              name,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                              ),
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              '×$count',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.white60,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );

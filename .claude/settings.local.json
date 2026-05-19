@@ -58,7 +58,8 @@
       "Bash(npx supabase *)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(npx supabase functions deploy paymongo-webhook --no-verify-jwt)"
     ]
   }
 }
